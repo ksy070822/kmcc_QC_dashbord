@@ -4,7 +4,7 @@
 // ============================================
 
 // 설정값
-const WEBAPP_URL = 'https://kmcc-qc-dashbord.vercel.app/api/sync'; // ⚠️ /api/sync 경로 추가 필수!
+const WEBAPP_URL = 'https://kmcc-qc-dashbord-iota.vercel.app/api/sync'; // ⚠️ /api/sync 경로 추가 필수!
 
 const YONGSAN_SHEET = '용산';
 const GWANGJU_SHEET = '광주';
