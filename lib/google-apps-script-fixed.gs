@@ -64,9 +64,9 @@ function syncData() {
     const totalRecords = yonsanData.length + gwangjuData.length;
     Logger.log(`[v0] 총 데이터: ${totalRecords}건`);
     
-    // 배치 전송 (각 배치는 최대 3MB로 제한)
-    const BATCH_SIZE = 2000; // 한 번에 전송할 레코드 수 (조정 가능)
-    const MAX_PAYLOAD_SIZE = 3 * 1024 * 1024; // 3MB
+    // 배치 전송 (각 배치는 최대 2MB로 제한 - Vercel 제한 고려)
+    const BATCH_SIZE = 1000; // 한 번에 전송할 레코드 수 (더 작게 설정)
+    const MAX_PAYLOAD_SIZE = 2 * 1024 * 1024; // 2MB (안전 마진)
     
     let totalProcessed = 0;
     let batchNumber = 0;
@@ -87,6 +87,7 @@ function syncData() {
       
       const payloadSize = JSON.stringify(payload).length;
       Logger.log(`[v0] 배치 ${batchNumber} (용산): ${batch.length}건, 크기: ${(payloadSize / 1024).toFixed(2)}KB`);
+      Logger.log(`[v0] 페이로드 구조: batch=${payload.batch}, yonsan.length=${payload.yonsan.length}, gwangju.length=${payload.gwangju.length}`);
       
       if (payloadSize > MAX_PAYLOAD_SIZE) {
         // 배치가 너무 크면 더 작게 나눔
