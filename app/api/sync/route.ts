@@ -34,24 +34,46 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 데이터 유효성 검사
-    if (!Array.isArray(data) || data.length === 0) {
+    // 데이터 형식 확인 및 처리
+    let parsedData
+    
+    // 형식 1: Apps Script 형식 { yonsan: [...], gwangju: [...] }
+    if (data.yonsan || data.gwangju) {
+      console.log("[API] Apps Script 형식 데이터 수신")
+      const yonsanRecords = Array.isArray(data.yonsan) ? data.yonsan : []
+      const gwangjuRecords = Array.isArray(data.gwangju) ? data.gwangju : []
+      
+      parsedData = parseAppsScriptData(yonsanRecords, gwangjuRecords)
+    }
+    // 형식 2: 로우 배열 형식 [[headers], [row1], [row2], ...]
+    else if (Array.isArray(data) && data.length > 0) {
+      console.log("[API] 로우 배열 형식 데이터 수신")
+      const headers = data[0] as string[]
+      const rows = data.slice(1)
+      parsedData = parseQCData(headers, rows)
+    }
+    // 형식 3: 테스트 요청
+    else if (data.test === true) {
       return NextResponse.json(
-        { success: false, error: "Invalid data format: expected non-empty array" },
+        {
+          success: true,
+          message: "연결 테스트 성공",
+          timestamp: new Date().toISOString(),
+          received: data,
+        },
+        { headers: corsHeaders }
+      )
+    }
+    else {
+      return NextResponse.json(
+        { success: false, error: "Invalid data format: expected {yonsan, gwangju} or array" },
         { status: 400, headers: corsHeaders }
       )
     }
 
-    // 헤더 행 추출 (첫 번째 행)
-    const headers = data[0] as string[]
-    const rows = data.slice(1)
-
-    // 데이터 파싱 및 처리
-    const parsedData = parseQCData(headers, rows)
-
     // 여기서 실제로는 데이터베이스에 저장하거나 상태 관리
     // 현재는 메모리에 저장 (실제 배포시 DB 연동 필요)
-    console.log(`[v0] Synced ${parsedData.evaluations.length} evaluations`)
+    console.log(`[API] Synced ${parsedData.evaluations.length} evaluations, ${parsedData.agents.length} agents`)
 
     return NextResponse.json(
       {
@@ -174,6 +196,86 @@ function parseQCData(headers: string[], rows: any[][]) {
       }
     } catch (e) {
       console.error(`[v0] Row ${rowIndex} parsing error:`, e)
+    }
+  })
+
+  return {
+    agents: Array.from(agentMap.values()),
+    evaluations,
+  }
+}
+
+// Apps Script 형식 데이터 파싱
+function parseAppsScriptData(yonsanRecords: any[], gwangjuRecords: any[]) {
+  const agents: any[] = []
+  const evaluations: any[] = []
+  const agentMap = new Map()
+
+  // 용산 + 광주 데이터 처리
+  const allRecords = [...yonsanRecords, ...gwangjuRecords]
+
+  allRecords.forEach((record, index) => {
+    try {
+      const agentId = record.id || `AGT${index}`
+      const agentName = record.name || ""
+
+      // 상담사 정보 저장
+      if (!agentMap.has(agentId) && agentName) {
+        agentMap.set(agentId, {
+          id: agentId,
+          name: agentName,
+          center: record.center || "",
+          group: record.service || "",
+          tenure: record.tenure || "",
+          hireDate: record.hireDate || "",
+          manager: `${record.service || ""}장`,
+        })
+      }
+
+      // 평가 항목 매핑
+      const items: Record<string, number> = {}
+      if (Array.isArray(record.evaluationItems)) {
+        // 평가 항목 인덱스를 이름으로 매핑
+        const itemNames = [
+          "첫인사/끝인사 누락",
+          "공감표현 누락",
+          "사과표현 누락",
+          "추가문의 누락",
+          "불친절",
+          "상담유형 오설정",
+          "가이드 미준수",
+          "본인확인 누락",
+          "필수탐색 누락",
+          "오안내",
+          "전산 처리 누락",
+          "전산 처리 미흡/정정",
+          "전산 조작 미흡/오류",
+          "콜/픽/트립ID 매핑누락&오기재",
+          "플래그/키워드 누락&오기재",
+          "상담이력 기재 미흡",
+        ]
+
+        record.evaluationItems.forEach((value: number, idx: number) => {
+          if (idx < itemNames.length) {
+            items[itemNames[idx]] = value || 0
+          }
+        })
+      }
+
+      // 평가 데이터 추가
+      if (record.evalDate && agentId) {
+        evaluations.push({
+          date: record.evalDate,
+          agentId,
+          items,
+          totalCalls: 0, // Apps Script 데이터에 없으면 0
+          errorRate: record.totalErrors || 0,
+          attitudeErrors: record.attitudeErrors || 0,
+          businessErrors: record.businessErrors || 0,
+        })
+      }
+    } catch (e) {
+      console.error(`[API] Record ${index} parsing error:`, e)
     }
   })
 
