@@ -53,7 +53,8 @@ export async function POST(request: NextRequest) {
     let parsedData
     
     // 형식 1: Apps Script 형식 { yonsan: [...], gwangju: [...] } (배치 지원)
-    if (data && typeof data === 'object' && ('yonsan' in data || 'gwangju' in data)) {
+    // data가 객체이고 yonsan 또는 gwangju 속성이 있는지 확인
+    if (data && typeof data === 'object' && !Array.isArray(data) && ('yonsan' in data || 'gwangju' in data)) {
       const batchNumber = data.batch || 0
       const isLast = data.isLast === true
       const processedSoFar = data.processedSoFar || 0
