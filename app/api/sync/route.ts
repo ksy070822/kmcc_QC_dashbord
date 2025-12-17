@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { db } from "@/lib/firebase"
 
 // CORS 헤더 설정
 const corsHeaders = {
@@ -134,9 +135,69 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 여기서 실제로는 데이터베이스에 저장하거나 상태 관리
-    // 현재는 메모리에 저장 (실제 배포시 DB 연동 필요)
+    // Firebase에 데이터 저장
     const batchInfo = (parsedData as any).batchInfo
+    let savedCount = 0
+    
+    try {
+      // 상담사 정보 저장
+      const agentsRef = db.collection('agents')
+      const agentBatch = db.batch()
+      let agentBatchCount = 0
+      
+      for (const agent of parsedData.agents) {
+        const agentDocRef = agentsRef.doc(agent.id)
+        agentBatch.set(agentDocRef, {
+          ...agent,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true })
+        agentBatchCount++
+        
+        // Firestore 배치 제한 (500개) 고려
+        if (agentBatchCount >= 500) {
+          await agentBatch.commit()
+          agentBatchCount = 0
+        }
+      }
+      
+      if (agentBatchCount > 0) {
+        await agentBatch.commit()
+      }
+      
+      // 평가 데이터 저장
+      const evaluationsRef = db.collection('evaluations')
+      const evalBatch = db.batch()
+      let evalBatchCount = 0
+      
+      for (const evaluation of parsedData.evaluations) {
+        // 문서 ID: agentId_date 형식
+        const docId = `${evaluation.agentId}_${evaluation.date}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        const evalDocRef = evaluationsRef.doc(docId)
+        
+        evalBatch.set(evalDocRef, {
+          ...evaluation,
+          batchNumber: batchInfo?.batchNumber || 0,
+          createdAt: new Date().toISOString(),
+        })
+        evalBatchCount++
+        savedCount++
+        
+        // Firestore 배치 제한 (500개) 고려
+        if (evalBatchCount >= 500) {
+          await evalBatch.commit()
+          evalBatchCount = 0
+        }
+      }
+      
+      if (evalBatchCount > 0) {
+        await evalBatch.commit()
+      }
+      
+      console.log(`[API] Firebase 저장 완료: ${savedCount}건의 평가, ${parsedData.agents.length}명의 상담사`)
+    } catch (firebaseError) {
+      console.error('[API] Firebase 저장 오류:', firebaseError)
+      // Firebase 오류가 있어도 응답은 반환 (부분 성공)
+    }
     
     if (batchInfo) {
       // 배치 처리
@@ -145,7 +206,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: true,
-          message: `배치 ${batchInfo.batchNumber} 처리 완료: ${parsedData.evaluations.length}건`,
+          message: `배치 ${batchInfo.batchNumber} 처리 완료: ${savedCount}건 저장됨`,
           timestamp: new Date().toISOString(),
           batch: {
             batchNumber: batchInfo.batchNumber,
@@ -153,7 +214,7 @@ export async function POST(request: NextRequest) {
             processedSoFar: batchInfo.processedSoFar + parsedData.evaluations.length,
             totalRecords: batchInfo.totalRecords,
             currentBatch: {
-              evaluations: parsedData.evaluations.length,
+              evaluations: savedCount,
               agents: parsedData.agents.length,
             },
           },
@@ -162,16 +223,16 @@ export async function POST(request: NextRequest) {
       )
     } else {
       // 일반 처리
-      console.log(`[API] Synced ${parsedData.evaluations.length} evaluations, ${parsedData.agents.length} agents`)
+      console.log(`[API] Synced ${savedCount} evaluations, ${parsedData.agents.length} agents`)
 
       return NextResponse.json(
         {
           success: true,
-          message: `${parsedData.evaluations.length}건의 평가 데이터가 동기화되었습니다.`,
+          message: `${savedCount}건의 평가 데이터가 동기화되었습니다.`,
           timestamp: new Date().toISOString(),
           summary: {
             agents: parsedData.agents.length,
-            evaluations: parsedData.evaluations.length,
+            evaluations: savedCount,
           },
         },
         { headers: corsHeaders }

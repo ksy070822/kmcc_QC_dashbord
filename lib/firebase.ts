@@ -1,0 +1,27 @@
+import { initializeApp, getApps, cert } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
+
+// Firebase Admin SDK 초기화
+if (!getApps().length) {
+  try {
+    // 환경 변수에서 Firebase 설정 읽기
+    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
+      ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+      : null
+
+    if (serviceAccount) {
+      initializeApp({
+        credential: cert(serviceAccount),
+      })
+    } else {
+      // 로컬 개발용: 서비스 계정 키 파일 경로 사용
+      // 프로덕션에서는 환경 변수 사용 권장
+      console.warn('[Firebase] FIREBASE_SERVICE_ACCOUNT 환경 변수가 설정되지 않았습니다.')
+    }
+  } catch (error) {
+    console.error('[Firebase] 초기화 실패:', error)
+  }
+}
+
+export const db = getFirestore()
+
