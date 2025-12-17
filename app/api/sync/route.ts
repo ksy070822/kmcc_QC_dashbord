@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { db, COLLECTIONS } from "@/lib/firebase-admin"
 
 // CORS 헤더 설정
 const corsHeaders = {
@@ -26,21 +27,9 @@ export async function POST(request: NextRequest) {
         )
       }
       data = JSON.parse(body)
-      
-      // 디버깅: 수신된 데이터 구조 로깅
+
       console.log("[API] 수신된 데이터 타입:", typeof data)
       console.log("[API] 데이터 키:", Object.keys(data || {}))
-      if (data && typeof data === 'object') {
-        console.log("[API] yonsan 존재:", 'yonsan' in data, "타입:", Array.isArray(data.yonsan))
-        console.log("[API] gwangju 존재:", 'gwangju' in data, "타입:", Array.isArray(data.gwangju))
-        console.log("[API] batch:", data.batch)
-        if (data.yonsan) {
-          console.log("[API] yonsan 길이:", Array.isArray(data.yonsan) ? data.yonsan.length : "배열 아님")
-        }
-        if (data.gwangju) {
-          console.log("[API] gwangju 길이:", Array.isArray(data.gwangju) ? data.gwangju.length : "배열 아님")
-        }
-      }
     } catch (parseError) {
       console.error("[API] JSON parse error:", parseError)
       return NextResponse.json(
@@ -51,34 +40,21 @@ export async function POST(request: NextRequest) {
 
     // 데이터 형식 확인 및 처리
     let parsedData
-    
-    // 형식 1: Apps Script 형식 { yonsan: [...], gwangju: [...] } (배치 지원)
-    // data가 객체이고 yonsan 또는 gwangju 속성이 있는지 확인
-    const isObject = data && typeof data === 'object' && !Array.isArray(data)
-    const hasYonsan = isObject && (data.yonsan !== undefined || 'yonsan' in data)
-    const hasGwangju = isObject && (data.gwangju !== undefined || 'gwangju' in data)
-    
-    console.log(`[API] 데이터 검증: isObject=${isObject}, hasYonsan=${hasYonsan}, hasGwangju=${hasGwangju}, isArray=${Array.isArray(data)}, type=${typeof data}`)
-    if (isObject) {
-      console.log(`[API] 데이터 키: ${Object.keys(data).join(', ')}`)
-      console.log(`[API] yonsan 타입: ${typeof data.yonsan}, isArray: ${Array.isArray(data.yonsan)}`)
-      console.log(`[API] gwangju 타입: ${typeof data.gwangju}, isArray: ${Array.isArray(data.gwangju)}`)
-    }
-    
+
+    const hasYonsan = data && typeof data === 'object' && !Array.isArray(data) && 'yonsan' in data
+    const hasGwangju = data && typeof data === 'object' && !Array.isArray(data) && 'gwangju' in data
+
     if (hasYonsan || hasGwangju) {
       const batchNumber = data.batch || 0
       const isLast = data.isLast === true
       const processedSoFar = data.processedSoFar || 0
       const totalRecords = data.totalRecords || 0
-      
-      console.log(`[API] Apps Script 배치 데이터 수신: 배치 ${batchNumber}, ${isLast ? '마지막' : '진행중'}`)
-      
+
+      console.log(`[API] Apps Script 배치 데이터 수신: 배치 ${batchNumber}`)
+
       const yonsanRecords = Array.isArray(data.yonsan) ? data.yonsan : []
       const gwangjuRecords = Array.isArray(data.gwangju) ? data.gwangju : []
-      
-      console.log(`[API] 배치 데이터: 용산 ${yonsanRecords.length}건, 광주 ${gwangjuRecords.length}건`)
-      
-      // 빈 배치도 허용 (배치 처리 중일 수 있음)
+
       if (yonsanRecords.length === 0 && gwangjuRecords.length === 0) {
         return NextResponse.json(
           {
@@ -96,26 +72,71 @@ export async function POST(request: NextRequest) {
           { headers: corsHeaders }
         )
       }
-      
+
+      // 데이터 파싱
       parsedData = parseAppsScriptData(yonsanRecords, gwangjuRecords)
-      
-      // 배치 정보 포함
-      ;(parsedData as any).batchInfo = {
-        batchNumber,
-        isLast,
-        processedSoFar,
-        totalRecords,
-        currentBatchSize: yonsanRecords.length + gwangjuRecords.length,
+
+      // Firestore에 데이터 저장
+      let savedCount = 0
+      const batch = db.batch()
+
+      for (const evaluation of parsedData.evaluations) {
+        // 고유 ID 생성: agentId_evalDate_consultId
+        const docId = `${evaluation.agentId}_${evaluation.evalDate}_${evaluation.consultId || Date.now()}`
+        const docRef = db.collection(COLLECTIONS.EVALUATIONS).doc(docId)
+
+        batch.set(docRef, {
+          ...evaluation,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }, { merge: true })
+
+        savedCount++
       }
+
+      // 상담사 정보 저장
+      for (const agent of parsedData.agents) {
+        const agentRef = db.collection(COLLECTIONS.AGENTS).doc(agent.id)
+        batch.set(agentRef, {
+          ...agent,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true })
+      }
+
+      // 배치 커밋
+      await batch.commit()
+
+      console.log(`[API] Firestore 저장 완료: ${savedCount}건`)
+
+      // 동기화 로그 저장
+      if (isLast) {
+        await db.collection(COLLECTIONS.SYNC_LOGS).add({
+          timestamp: new Date().toISOString(),
+          totalRecords: totalRecords,
+          status: 'completed',
+        })
+      }
+
+      return NextResponse.json(
+        {
+          success: true,
+          message: `배치 ${batchNumber} 처리 완료: ${savedCount}건`,
+          timestamp: new Date().toISOString(),
+          batch: {
+            batchNumber,
+            isLast,
+            processedSoFar: processedSoFar + savedCount,
+            totalRecords,
+            currentBatch: {
+              evaluations: savedCount,
+              agents: parsedData.agents.length,
+            },
+          },
+        },
+        { headers: corsHeaders }
+      )
     }
-    // 형식 2: 로우 배열 형식 [[headers], [row1], [row2], ...]
-    else if (Array.isArray(data) && data.length > 0) {
-      console.log("[API] 로우 배열 형식 데이터 수신")
-      const headers = data[0] as string[]
-      const rows = data.slice(1)
-      parsedData = parseQCData(headers, rows)
-    }
-    // 형식 3: 테스트 요청
+    // 테스트 요청
     else if (data.test === true) {
       return NextResponse.json(
         {
@@ -129,52 +150,8 @@ export async function POST(request: NextRequest) {
     }
     else {
       return NextResponse.json(
-        { success: false, error: "Invalid data format: expected {yonsan, gwangju} or array" },
+        { success: false, error: "Invalid data format: expected {yonsan, gwangju}" },
         { status: 400, headers: corsHeaders }
-      )
-    }
-
-    // 여기서 실제로는 데이터베이스에 저장하거나 상태 관리
-    // 현재는 메모리에 저장 (실제 배포시 DB 연동 필요)
-    const batchInfo = (parsedData as any).batchInfo
-    
-    if (batchInfo) {
-      // 배치 처리
-      console.log(`[API] 배치 ${batchInfo.batchNumber} 처리: ${parsedData.evaluations.length}건`)
-      
-      return NextResponse.json(
-        {
-          success: true,
-          message: `배치 ${batchInfo.batchNumber} 처리 완료: ${parsedData.evaluations.length}건`,
-          timestamp: new Date().toISOString(),
-          batch: {
-            batchNumber: batchInfo.batchNumber,
-            isLast: batchInfo.isLast,
-            processedSoFar: batchInfo.processedSoFar + parsedData.evaluations.length,
-            totalRecords: batchInfo.totalRecords,
-            currentBatch: {
-              evaluations: parsedData.evaluations.length,
-              agents: parsedData.agents.length,
-            },
-          },
-        },
-        { headers: corsHeaders }
-      )
-    } else {
-      // 일반 처리
-      console.log(`[API] Synced ${parsedData.evaluations.length} evaluations, ${parsedData.agents.length} agents`)
-
-      return NextResponse.json(
-        {
-          success: true,
-          message: `${parsedData.evaluations.length}건의 평가 데이터가 동기화되었습니다.`,
-          timestamp: new Date().toISOString(),
-          summary: {
-            agents: parsedData.agents.length,
-            evaluations: parsedData.evaluations.length,
-          },
-        },
-        { headers: corsHeaders }
       )
     }
   } catch (error) {
@@ -193,105 +170,41 @@ export async function POST(request: NextRequest) {
 
 // GET 요청으로 동기화 상태 확인
 export async function GET() {
-  return NextResponse.json(
-    {
-      status: "ready",
-      lastSync: new Date().toISOString(),
-      message: "동기화 API가 정상 작동 중입니다.",
-    },
-    { headers: corsHeaders }
-  )
-}
+  try {
+    // 최근 동기화 로그 조회
+    const syncLogsSnapshot = await db.collection(COLLECTIONS.SYNC_LOGS)
+      .orderBy('timestamp', 'desc')
+      .limit(1)
+      .get()
 
-// 스프레드시트 데이터 파싱 함수
-function parseQCData(headers: string[], rows: any[][]) {
-  const agents: any[] = []
-  const evaluations: any[] = []
-  const agentMap = new Map()
-
-  // 예상 헤더 매핑 (스프레드시트 컬럼명에 맞게 조정 필요)
-  const headerMap: Record<string, number> = {}
-  headers.forEach((h, i) => {
-    headerMap[h.toLowerCase().trim()] = i
-  })
-
-  rows.forEach((row, rowIndex) => {
-    try {
-      // 기본 정보 추출 (컬럼명은 실제 스프레드시트에 맞게 조정)
-      const agentId = row[headerMap["상담사id"]] || row[headerMap["사번"]] || `AGT${rowIndex}`
-      const agentName = row[headerMap["상담사명"]] || row[headerMap["이름"]] || ""
-      const center = row[headerMap["센터"]] || ""
-      const group = row[headerMap["그룹"]] || ""
-      const date = row[headerMap["날짜"]] || row[headerMap["평가일"]] || ""
-      const tenure = row[headerMap["근속기간"]] || row[headerMap["근속"]] || ""
-
-      // 상담사 정보 저장
-      if (!agentMap.has(agentId) && agentName) {
-        agentMap.set(agentId, {
-          id: agentId,
-          name: agentName,
-          center,
-          group,
-          tenure,
-          hireDate: "",
-          manager: `${group}장`,
-        })
-      }
-
-      // 평가항목 데이터 추출
-      const items: Record<string, number> = {}
-
-      // 상담태도 항목
-      const attitudeItems = ["첫인사", "끝인사", "공감표현", "사과표현", "추가문의", "불친절"]
-      attitudeItems.forEach((item) => {
-        const idx = headers.findIndex((h) => h.includes(item))
-        if (idx >= 0) {
-          items[item] = Number(row[idx]) || 0
-        }
-      })
-
-      // 오상담/오처리 항목
-      const errorItems = [
-        "상담유형",
-        "가이드",
-        "본인확인",
-        "필수탐색",
-        "오안내",
-        "전산처리",
-        "정보수정",
-        "후처리",
-        "이관",
-        "민원",
-        "기타",
-      ]
-      errorItems.forEach((item) => {
-        const idx = headers.findIndex((h) => h.includes(item))
-        if (idx >= 0) {
-          items[item] = Number(row[idx]) || 0
-        }
-      })
-
-      // 총 콜수, 오류율 추출
-      const totalCalls = Number(row[headerMap["총콜수"]] || row[headerMap["콜수"]]) || 0
-      const errorRate = Number(row[headerMap["오류율"]]) || 0
-
-      if (date && agentId) {
-        evaluations.push({
-          date,
-          agentId,
-          items,
-          totalCalls,
-          errorRate,
-        })
-      }
-    } catch (e) {
-      console.error(`[v0] Row ${rowIndex} parsing error:`, e)
+    let lastSync = null
+    if (!syncLogsSnapshot.empty) {
+      lastSync = syncLogsSnapshot.docs[0].data()
     }
-  })
 
-  return {
-    agents: Array.from(agentMap.values()),
-    evaluations,
+    // 전체 평가 데이터 수 조회
+    const evaluationsSnapshot = await db.collection(COLLECTIONS.EVALUATIONS).count().get()
+    const totalEvaluations = evaluationsSnapshot.data().count
+
+    return NextResponse.json(
+      {
+        status: "ready",
+        lastSync: lastSync?.timestamp || null,
+        totalEvaluations,
+        message: "동기화 API가 정상 작동 중입니다.",
+      },
+      { headers: corsHeaders }
+    )
+  } catch (error) {
+    console.error("[API] GET error:", error)
+    return NextResponse.json(
+      {
+        status: "ready",
+        lastSync: new Date().toISOString(),
+        message: "동기화 API가 정상 작동 중입니다.",
+      },
+      { headers: corsHeaders }
+    )
   }
 }
 
@@ -301,8 +214,10 @@ function parseAppsScriptData(yonsanRecords: any[], gwangjuRecords: any[]) {
   const evaluations: any[] = []
   const agentMap = new Map()
 
-  // 용산 + 광주 데이터 처리
-  const allRecords = [...yonsanRecords, ...gwangjuRecords]
+  const allRecords = [
+    ...yonsanRecords.map(r => ({ ...r, center: '용산' })),
+    ...gwangjuRecords.map(r => ({ ...r, center: '광주' }))
+  ]
 
   allRecords.forEach((record, index) => {
     try {
@@ -315,39 +230,38 @@ function parseAppsScriptData(yonsanRecords: any[], gwangjuRecords: any[]) {
           id: agentId,
           name: agentName,
           center: record.center || "",
-          group: record.service || "",
+          service: record.service || "",
+          channel: record.channel || "",
           tenure: record.tenure || "",
           hireDate: record.hireDate || "",
-          manager: `${record.service || ""}장`,
         })
       }
 
       // 평가 항목 매핑
-      const items: Record<string, number> = {}
-      if (Array.isArray(record.evaluationItems)) {
-        // 평가 항목 인덱스를 이름으로 매핑
-        const itemNames = [
-          "첫인사/끝인사 누락",
-          "공감표현 누락",
-          "사과표현 누락",
-          "추가문의 누락",
-          "불친절",
-          "상담유형 오설정",
-          "가이드 미준수",
-          "본인확인 누락",
-          "필수탐색 누락",
-          "오안내",
-          "전산 처리 누락",
-          "전산 처리 미흡/정정",
-          "전산 조작 미흡/오류",
-          "콜/픽/트립ID 매핑누락&오기재",
-          "플래그/키워드 누락&오기재",
-          "상담이력 기재 미흡",
-        ]
+      const itemNames = [
+        "첫인사/끝인사 누락",
+        "공감표현 누락",
+        "사과표현 누락",
+        "추가문의 누락",
+        "불친절",
+        "상담유형 오설정",
+        "가이드 미준수",
+        "본인확인 누락",
+        "필수탐색 누락",
+        "오안내",
+        "전산 처리 누락",
+        "전산 처리 미흡/정정",
+        "전산 조작 미흡/오류",
+        "콜/픽/트립ID 매핑누락&오기재",
+        "플래그/키워드 누락&오기재",
+        "상담이력 기재 미흡",
+      ]
 
+      const evaluationItems: Record<string, number> = {}
+      if (Array.isArray(record.evaluationItems)) {
         record.evaluationItems.forEach((value: number, idx: number) => {
           if (idx < itemNames.length) {
-            items[itemNames[idx]] = value || 0
+            evaluationItems[itemNames[idx]] = value || 0
           }
         })
       }
@@ -355,13 +269,18 @@ function parseAppsScriptData(yonsanRecords: any[], gwangjuRecords: any[]) {
       // 평가 데이터 추가
       if (record.evalDate && agentId) {
         evaluations.push({
-          date: record.evalDate,
           agentId,
-          items,
-          totalCalls: 0, // Apps Script 데이터에 없으면 0
-          errorRate: record.totalErrors || 0,
+          agentName,
+          center: record.center || "",
+          service: record.service || "",
+          channel: record.channel || "",
+          evalDate: record.evalDate,
+          evalId: record.evalId || "",
+          consultId: record.consultId || "",
+          evaluationItems,
           attitudeErrors: record.attitudeErrors || 0,
           businessErrors: record.businessErrors || 0,
+          totalErrors: record.totalErrors || 0,
         })
       }
     } catch (e) {
