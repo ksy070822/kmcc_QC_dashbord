@@ -218,9 +218,15 @@ export async function getDashboardStats(targetDate?: string) {
     const yonsanAgents = agents.filter(a => a.center === '용산')
     const gwangjuAgents = agents.filter(a => a.center === '광주')
 
-    // 오늘 날짜 또는 지정된 날짜의 평가 데이터
+    // 전일(어제) 날짜 또는 지정된 날짜의 평가 데이터
     // 날짜 형식 통일: YYYY-MM-DD
-    let queryDate = targetDate || new Date().toISOString().split('T')[0]
+    // targetDate가 없으면 어제 날짜 사용 (전일 평가건수 표시용)
+    let queryDate = targetDate
+    if (!queryDate) {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      queryDate = yesterday.toISOString().split('T')[0]
+    }
     
     // 날짜 형식이 다를 수 있으므로 정규화
     if (!/^\d{4}-\d{2}-\d{2}$/.test(queryDate)) {
@@ -249,13 +255,13 @@ export async function getDashboardStats(targetDate?: string) {
     console.log(`[Firebase] 센터별 분포: 용산 ${todayEvaluations.filter((e: any) => e.center === '용산').length}건, 광주 ${todayEvaluations.filter((e: any) => e.center === '광주').length}건`)
 
     // 통계 계산
-    const totalEvaluations = todayEvaluations.length
+    const totalEvaluations = dateEvaluations.length
 
     // 오류율 계산
     let totalAttitudeErrors = 0
     let totalBusinessErrors = 0
 
-    todayEvaluations.forEach((ev: any) => {
+    dateEvaluations.forEach((ev: any) => {
       totalAttitudeErrors += ev.attitudeErrors || 0
       totalBusinessErrors += ev.businessErrors || 0
     })
@@ -271,7 +277,7 @@ export async function getDashboardStats(targetDate?: string) {
     // 유의 상담사 (오류율 높은 상담사)
     const agentErrorCounts: Record<string, { attitude: number, business: number, total: number, center: string }> = {}
 
-    todayEvaluations.forEach((ev: any) => {
+    dateEvaluations.forEach((ev: any) => {
       const agentId = ev.agentId
       if (!agentErrorCounts[agentId]) {
         agentErrorCounts[agentId] = { attitude: 0, business: 0, total: 0, center: ev.center || '' }
@@ -299,7 +305,7 @@ export async function getDashboardStats(targetDate?: string) {
         attitudeErrorRate,
         businessErrorRate,
         overallErrorRate,
-        date: today,
+        date: queryDate,
       }
     }
   } catch (error) {
