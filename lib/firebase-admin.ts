@@ -219,12 +219,34 @@ export async function getDashboardStats(targetDate?: string) {
     const gwangjuAgents = agents.filter(a => a.center === '광주')
 
     // 오늘 날짜 또는 지정된 날짜의 평가 데이터
-    const today = targetDate || new Date().toISOString().split('T')[0]
+    // 날짜 형식 통일: YYYY-MM-DD
+    let queryDate = targetDate || new Date().toISOString().split('T')[0]
+    
+    // 날짜 형식이 다를 수 있으므로 정규화
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(queryDate)) {
+      try {
+        const dateObj = new Date(queryDate)
+        if (!isNaN(dateObj.getTime())) {
+          const year = dateObj.getFullYear()
+          const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+          const day = String(dateObj.getDate()).padStart(2, '0')
+          queryDate = `${year}-${month}-${day}`
+        }
+      } catch (e) {
+        console.error('[Firebase] 날짜 형식 오류:', queryDate)
+      }
+    }
+    
+    console.log(`[Firebase] 조회 날짜: ${queryDate}`)
+    
     const evaluationsSnapshot = await db.collection('evaluations')
-      .where('date', '==', today)
+      .where('date', '==', queryDate)
       .get()
 
     const todayEvaluations = evaluationsSnapshot.docs.map(doc => doc.data())
+    
+    console.log(`[Firebase] ${queryDate} 날짜의 평가 데이터: ${todayEvaluations.length}건`)
+    console.log(`[Firebase] 센터별 분포: 용산 ${todayEvaluations.filter((e: any) => e.center === '용산').length}건, 광주 ${todayEvaluations.filter((e: any) => e.center === '광주').length}건`)
 
     // 통계 계산
     const totalEvaluations = todayEvaluations.length

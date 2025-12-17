@@ -400,8 +400,28 @@ function parseAppsScriptData(yonsanRecords: any[], gwangjuRecords: any[]) {
 
       // 평가 데이터 추가
       if (record.evalDate && agentId) {
+        // 날짜 형식 통일 (YYYY-MM-DD)
+        let normalizedDate = record.evalDate
+        
+        // 이미 YYYY-MM-DD 형식이 아닌 경우 변환
+        if (typeof normalizedDate === 'string' && !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+          try {
+            const dateObj = new Date(normalizedDate)
+            if (!isNaN(dateObj.getTime())) {
+              const year = dateObj.getFullYear()
+              const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+              const day = String(dateObj.getDate()).padStart(2, '0')
+              normalizedDate = `${year}-${month}-${day}`
+            }
+          } catch (e) {
+            console.error(`[API] 날짜 변환 실패: ${normalizedDate}`, e)
+            // 날짜 변환 실패 시 스킵
+            return
+          }
+        }
+        
         evaluations.push({
-          date: record.evalDate,
+          date: normalizedDate, // 통일된 날짜 형식
           agentId,
           agentName,
           center: record.center || "",

@@ -190,6 +190,95 @@ function readSheetData(sheetName, center) {
     // 빈 행 스킵
     if (!row[nameIdx]) continue;
     
+    // 평가일 날짜 형식 통일 (YYYY-MM-DD)
+    // 구글 시트에서 날짜 서식으로 지정된 경우 Date 객체로 읽힘
+    let evalDate = '';
+    if (row[evalDateIdx]) {
+      try {
+        const dateValue = row[evalDateIdx];
+        let dateObj;
+        
+        // 이미 Date 객체인 경우 (날짜 서식으로 지정된 경우)
+        if (dateValue instanceof Date) {
+          dateObj = dateValue;
+        }
+        // 문자열인 경우 파싱
+        else if (typeof dateValue === 'string') {
+          const dateStr = dateValue.trim();
+          
+          // "2025. 12. 16" 형식 처리 (점과 공백 포함)
+          if (dateStr.includes('.')) {
+            const parts = dateStr.split('.').map(p => p.trim()).filter(p => p);
+            if (parts.length >= 3) {
+              const year = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10);
+              const day = parseInt(parts[2], 10);
+              dateObj = new Date(year, month - 1, day);
+            } else {
+              dateObj = new Date(dateStr);
+            }
+          }
+          // "12/16" 또는 "2024/12/16" 형식 처리
+          else if (dateStr.includes('/')) {
+            const parts = dateStr.split('/').map(p => p.trim());
+            if (parts.length === 2) {
+              // "12/16" 형식 -> 올해 12월 16일
+              const month = parseInt(parts[0], 10);
+              const day = parseInt(parts[1], 10);
+              const year = new Date().getFullYear();
+              dateObj = new Date(year, month - 1, day);
+            } else if (parts.length === 3) {
+              // "2024/12/16" 형식
+              const year = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10);
+              const day = parseInt(parts[2], 10);
+              dateObj = new Date(year, month - 1, day);
+            } else {
+              dateObj = new Date(dateStr);
+            }
+          }
+          // "2024-12-16" 형식
+          else if (dateStr.includes('-')) {
+            dateObj = new Date(dateStr);
+          }
+          // 기타 형식
+          else {
+            dateObj = new Date(dateStr);
+          }
+        }
+        // 숫자 타임스탬프인 경우
+        else if (typeof dateValue === 'number') {
+          dateObj = new Date(dateValue);
+        }
+        // 그 외의 경우
+        else {
+          dateObj = new Date(dateValue);
+        }
+        
+        // 유효한 날짜인지 확인
+        if (isNaN(dateObj.getTime())) {
+          Logger.log(`[v0] 잘못된 날짜 형식: ${dateValue} (행 ${i + 1})`);
+          continue; // 날짜가 유효하지 않으면 스킵
+        }
+        
+        // YYYY-MM-DD 형식으로 변환
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        evalDate = `${year}-${month}-${day}`;
+        
+        Logger.log(`[v0] 날짜 변환: ${dateValue} -> ${evalDate} (행 ${i + 1})`);
+      } catch (e) {
+        Logger.log(`[v0] 날짜 파싱 오류: ${row[evalDateIdx]} (행 ${i + 1}): ${e.message}`);
+        continue; // 날짜 파싱 실패 시 스킵
+      }
+    }
+    
+    // 평가일이 없으면 스킵
+    if (!evalDate) {
+      continue;
+    }
+    
     // 근속 기간 계산
     const hireDate = new Date(row[hireIdx]);
     const tenure = calculateTenure(hireDate);
@@ -220,7 +309,7 @@ function readSheetData(sheetName, center) {
       channel: row[channelIdx],
       hireDate: row[hireIdx],
       tenure: tenure,
-      evalDate: row[evalDateIdx],
+      evalDate: evalDate, // 통일된 날짜 형식 사용
       evalId: row[evalIdIdx],
       evaluationItems: evalItems,
       attitudeErrors: attitudeErrors,
