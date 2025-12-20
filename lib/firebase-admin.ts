@@ -257,16 +257,39 @@ export async function getDashboardStats(targetDate?: string) {
       }
     }
     
-    console.log(`[Firebase] 조회 날짜: ${queryDate}`)
+    console.log(`[Firebase] 조회 날짜: ${queryDate} (targetDate: ${targetDate || '없음'})`)
     
+    // 날짜 필드로 조회
     const evaluationsSnapshot = await db.collection('evaluations')
       .where('date', '==', queryDate)
       .get()
 
-    dateEvaluations = evaluationsSnapshot.docs.map(doc => doc.data())
+    dateEvaluations = evaluationsSnapshot.docs.map(doc => {
+      const data = doc.data()
+      // 디버깅: 날짜 필드 확인
+      if (data.date !== queryDate) {
+        console.warn(`[Firebase] 날짜 불일치: 조회=${queryDate}, 저장=${data.date}`)
+      }
+      return data
+    })
     
     console.log(`[Firebase] ${queryDate} 날짜의 평가 데이터: ${dateEvaluations.length}건`)
-    console.log(`[Firebase] 센터별 분포: 용산 ${dateEvaluations.filter((e: any) => e.center === '용산').length}건, 광주 ${dateEvaluations.filter((e: any) => e.center === '광주').length}건`)
+    const yonsanCount = dateEvaluations.filter((e: any) => e.center === '용산').length
+    const gwangjuCount = dateEvaluations.filter((e: any) => e.center === '광주').length
+    console.log(`[Firebase] 센터별 분포: 용산 ${yonsanCount}건, 광주 ${gwangjuCount}건`)
+    
+    // 데이터가 없으면 최근 날짜 확인
+    if (dateEvaluations.length === 0) {
+      console.log(`[Firebase] ${queryDate} 날짜에 데이터가 없습니다. 최근 평가 데이터 확인 중...`)
+      const recentSnapshot = await db.collection('evaluations')
+        .orderBy('date', 'desc')
+        .limit(5)
+        .get()
+      
+      const recentDates = recentSnapshot.docs.map(doc => doc.data().date).filter(Boolean)
+      const uniqueDates = [...new Set(recentDates)]
+      console.log(`[Firebase] 최근 평가 날짜들: ${uniqueDates.join(', ')}`)
+    }
 
     // 통계 계산
     const totalEvaluations = dateEvaluations.length
