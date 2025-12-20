@@ -277,49 +277,57 @@ export async function getDashboardStats(targetDate?: string) {
       .where('date', '==', queryDate)
       .get()
     
-    // 데이터가 없으면 날짜 형식 변형 시도 (예: 2025-12-19 vs 2025-12-19T00:00:00)
+    // 데이터가 없으면 샘플 데이터를 확인하여 날짜 형식 파악
     if (evaluationsSnapshot.empty) {
-      console.log(`[Firebase] 정확한 일치로 데이터를 찾지 못했습니다. 다른 형식 시도 중...`)
+      console.log(`[Firebase] 정확한 일치(${queryDate})로 데이터를 찾지 못했습니다. 샘플 데이터 확인 중...`)
       
-      // 날짜 범위로 조회 시도 (하루 전체)
-      const startOfDay = `${queryDate}T00:00:00`
-      const endOfDay = `${queryDate}T23:59:59`
-      
-      evaluationsSnapshot = await db.collection('evaluations')
-        .where('date', '>=', queryDate)
-        .where('date', '<=', queryDate)
+      // 최근 평가 데이터 샘플 확인
+      const sampleSnapshot = await db.collection('evaluations')
+        .limit(10)
         .get()
       
-      // 여전히 없으면 문자열 포함 검색 시도
-      if (evaluationsSnapshot.empty) {
-        const allEvaluations = await db.collection('evaluations')
-          .limit(100)
-          .get()
-        
-        const matchingDocs = allEvaluations.docs.filter(doc => {
+      if (!sampleSnapshot.empty) {
+        const sampleDates = sampleSnapshot.docs.map(doc => {
           const data = doc.data()
-          const dateStr = String(data.date || '')
-          return dateStr.includes(queryDate) || dateStr.startsWith(queryDate)
+          return { date: data.date, type: typeof data.date, fullData: data }
         })
+        console.log(`[Firebase] 샘플 날짜 형식들:`, sampleDates)
         
-        if (matchingDocs.length > 0) {
-          console.log(`[Firebase] 부분 일치로 ${matchingDocs.length}건 발견`)
-          evaluationsSnapshot = {
-            docs: matchingDocs,
-            empty: false,
-          } as any
-        }
+        // 샘플에서 날짜 형식 확인 후 필터링
+        const allEvaluations = await db.collection('evaluations').get()
+        
+        dateEvaluations = allEvaluations.docs
+          .map(doc => doc.data())
+          .filter((data: any) => {
+            const dateStr = String(data.date || '')
+            // 여러 형식 시도: 정확한 일치, 부분 일치, 날짜만 추출
+            if (dateStr === queryDate) return true
+            if (dateStr.startsWith(queryDate)) return true
+            if (dateStr.includes(queryDate)) return true
+            
+            // 날짜 문자열에서 YYYY-MM-DD 형식 추출 시도
+            const dateMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/)
+            if (dateMatch && dateMatch[1] === queryDate) return true
+            
+            return false
+          })
+        
+        console.log(`[Firebase] 필터링 후 ${dateEvaluations.length}건 발견`)
+      } else {
+        console.log(`[Firebase] 평가 데이터가 없습니다.`)
+        dateEvaluations = []
       }
-    }
+    } else {
 
-    dateEvaluations = evaluationsSnapshot.docs.map(doc => {
-      const data = doc.data()
-      // 디버깅: 날짜 필드 확인
-      if (data.date !== queryDate) {
-        console.warn(`[Firebase] 날짜 불일치: 조회=${queryDate}, 저장=${data.date}`)
-      }
-      return data
-    })
+      dateEvaluations = evaluationsSnapshot.docs.map(doc => {
+        const data = doc.data()
+        // 디버깅: 날짜 필드 확인
+        if (data.date !== queryDate) {
+          console.warn(`[Firebase] 날짜 불일치: 조회=${queryDate}, 저장=${data.date}`)
+        }
+        return data
+      })
+    }
     
     console.log(`[Firebase] ${queryDate} 날짜의 평가 데이터: ${dateEvaluations.length}건`)
     const yonsanCount = dateEvaluations.filter((e: any) => e.center === '용산').length
