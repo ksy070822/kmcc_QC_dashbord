@@ -407,19 +407,74 @@ function parseAppsScriptData(yonsanRecords: any[], gwangjuRecords: any[]) {
         // 날짜 형식 통일 (YYYY-MM-DD)
         let normalizedDate = record.evalDate
         
-        // 이미 YYYY-MM-DD 형식이 아닌 경우 변환
-        if (typeof normalizedDate === 'string' && !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+        // 날짜 정규화 함수: "2025. 12. 19", "2025.12.19", "2025-12-19" 등을 "2025-12-19"로 변환
+        const normalizeDateString = (dateStr: string): string | null => {
+          if (!dateStr) return null
+          
+          // 이미 YYYY-MM-DD 형식
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            return dateStr
+          }
+          
+          // "2025. 12. 19" 또는 "2025.12.19" 형식 처리
+          const dotMatch = dateStr.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})/)
+          if (dotMatch) {
+            const year = dotMatch[1]
+            const month = String(parseInt(dotMatch[2], 10)).padStart(2, '0')
+            const day = String(parseInt(dotMatch[3], 10)).padStart(2, '0')
+            return `${year}-${month}-${day}`
+          }
+          
+          // "2025/12/19" 형식 처리
+          const slashMatch = dateStr.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/)
+          if (slashMatch) {
+            const year = slashMatch[1]
+            const month = String(parseInt(slashMatch[2], 10)).padStart(2, '0')
+            const day = String(parseInt(slashMatch[3], 10)).padStart(2, '0')
+            return `${year}-${month}-${day}`
+          }
+          
+          // Date 객체로 파싱 시도
           try {
-            const dateObj = new Date(normalizedDate)
+            const dateObj = new Date(dateStr)
+            if (!isNaN(dateObj.getTime())) {
+              const year = dateObj.getFullYear()
+              const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+              const day = String(dateObj.getDate()).padStart(2, '0')
+              return `${year}-${month}-${day}`
+            }
+          } catch (e) {
+            // Date 파싱 실패
+          }
+          
+          return null
+        }
+        
+        // 날짜 정규화
+        if (typeof normalizedDate === 'string') {
+          const normalized = normalizeDateString(normalizedDate)
+          if (normalized) {
+            normalizedDate = normalized
+          } else {
+            console.error(`[API] 날짜 변환 실패: ${normalizedDate}`)
+            // 날짜 변환 실패 시 스킵
+            return
+          }
+        } else {
+          // Date 객체인 경우
+          try {
+            const dateObj = normalizedDate instanceof Date ? normalizedDate : new Date(normalizedDate)
             if (!isNaN(dateObj.getTime())) {
               const year = dateObj.getFullYear()
               const month = String(dateObj.getMonth() + 1).padStart(2, '0')
               const day = String(dateObj.getDate()).padStart(2, '0')
               normalizedDate = `${year}-${month}-${day}`
+            } else {
+              console.error(`[API] 날짜 변환 실패: ${normalizedDate}`)
+              return
             }
           } catch (e) {
             console.error(`[API] 날짜 변환 실패: ${normalizedDate}`, e)
-            // 날짜 변환 실패 시 스킵
             return
           }
         }
