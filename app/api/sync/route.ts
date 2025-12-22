@@ -16,11 +16,19 @@ export async function OPTIONS() {
 // Google Apps Script에서 POST로 데이터를 받는 API
 export async function POST(request: NextRequest) {
   try {
+    console.log("[API] ===== POST 요청 수신 =====")
+    console.log("[API] 요청 URL:", request.url)
+    console.log("[API] 요청 헤더:", Object.fromEntries(request.headers.entries()))
+    
     // 요청 본문 읽기
     let data
     try {
       const body = await request.text()
+      console.log("[API] 요청 본문 길이:", body.length)
+      console.log("[API] 요청 본문 처음 500자:", body.substring(0, 500))
+      
       if (!body) {
+        console.error("[API] 요청 본문이 비어있음")
         return NextResponse.json(
           { success: false, error: "Request body is empty" },
           { status: 400, headers: corsHeaders }
@@ -34,12 +42,19 @@ export async function POST(request: NextRequest) {
       if (data && typeof data === 'object') {
         console.log("[API] yonsan 존재:", 'yonsan' in data, "타입:", Array.isArray(data.yonsan))
         console.log("[API] gwangju 존재:", 'gwangju' in data, "타입:", Array.isArray(data.gwangju))
+        console.log("[API] data 속성 존재:", 'data' in data, "타입:", typeof data.data, "isArray:", Array.isArray(data.data))
         console.log("[API] batch:", data.batch)
         if (data.yonsan) {
           console.log("[API] yonsan 길이:", Array.isArray(data.yonsan) ? data.yonsan.length : "배열 아님")
         }
         if (data.gwangju) {
           console.log("[API] gwangju 길이:", Array.isArray(data.gwangju) ? data.gwangju.length : "배열 아님")
+        }
+        if (data.data) {
+          console.log("[API] data.data 길이:", Array.isArray(data.data) ? data.data.length : "배열 아님")
+          if (Array.isArray(data.data) && data.data.length > 0) {
+            console.log("[API] data.data 첫 번째 레코드:", JSON.stringify(data.data[0]).substring(0, 200))
+          }
         }
       }
     } catch (parseError) {

@@ -262,6 +262,17 @@ function sendToWebApp(payload) {
       throw new Error('페이로드가 없습니다.');
     }
     
+    // 페이로드 구조 로깅
+    Logger.log('[v0] 페이로드 구조 확인:');
+    Logger.log('[v0] - batch: ' + payload.batch);
+    Logger.log('[v0] - hasData: ' + ('data' in payload));
+    Logger.log('[v0] - dataType: ' + typeof payload.data);
+    Logger.log('[v0] - dataIsArray: ' + Array.isArray(payload.data));
+    Logger.log('[v0] - dataLength: ' + (Array.isArray(payload.data) ? payload.data.length : 'N/A'));
+    if (Array.isArray(payload.data) && payload.data.length > 0) {
+      Logger.log('[v0] - 첫 번째 레코드 샘플: ' + JSON.stringify(payload.data[0]).substring(0, 200));
+    }
+    
     const payloadString = JSON.stringify(payload);
     if (!payloadString) {
       throw new Error('페이로드를 JSON으로 변환할 수 없습니다.');
