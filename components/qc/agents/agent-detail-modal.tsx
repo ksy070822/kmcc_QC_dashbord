@@ -14,12 +14,11 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  Cell,
   ReferenceLine,
 } from "recharts"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { evaluationItems } from "@/lib/mock-data"
+import { BarChart, Bar, Cell } from "recharts"
 
 interface AgentDetailModalProps {
   open: boolean
@@ -87,33 +86,34 @@ export function AgentDetailModal({ open, onOpenChange, agent }: AgentDetailModal
         </DialogHeader>
 
         <div className="space-y-6">
-          <div className="grid grid-cols-4 gap-4">
-            <Card className="border-border">
+          {/* 상단 정보 카드 - 2x2 그리드로 변경하여 여유 공간 확보 */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card className="border-slate-200 bg-slate-50">
               <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Building2 className="h-4 w-4" />
-                  소속
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+                  <Building2 className="h-3.5 w-3.5" />
+                  <span>소속</span>
                 </div>
-                <p className="mt-1 font-medium">
-                  {agent.center} {agent.group}
+                <p className="text-sm font-semibold text-slate-800 leading-tight">
+                  {agent.center}<br/>{agent.group}
                 </p>
               </CardContent>
             </Card>
-            <Card className="border-border">
+            <Card className="border-slate-200 bg-slate-50">
               <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Calendar className="h-4 w-4" />
-                  근속기간
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span>근속기간</span>
                 </div>
-                <p className="mt-1 font-medium">{agent.tenure}</p>
+                <p className="text-sm font-semibold text-slate-800">{agent.tenure}</p>
               </CardContent>
             </Card>
-            <Card className="border-border">
+            <Card className="border-slate-200 bg-white">
               <CardContent className="p-4">
-                <div className="text-sm text-muted-foreground">금일 오류율</div>
+                <div className="text-xs text-slate-500 mb-1">금일 오류율</div>
                 <p
                   className={cn(
-                    "mt-1 text-2xl font-bold",
+                    "text-xl font-bold",
                     agent.errorRate > 5 ? "text-red-600" : agent.errorRate > 3 ? "text-amber-600" : "text-green-600",
                   )}
                 >
@@ -121,16 +121,16 @@ export function AgentDetailModal({ open, onOpenChange, agent }: AgentDetailModal
                 </p>
               </CardContent>
             </Card>
-            <Card className="border-border">
+            <Card className="border-slate-200 bg-white">
               <CardContent className="p-4">
-                <div className="text-sm text-muted-foreground">전일 대비</div>
+                <div className="text-xs text-slate-500 mb-1">전일 대비</div>
                 <p
                   className={cn(
-                    "mt-1 flex items-center gap-1 text-2xl font-bold",
+                    "flex items-center gap-1 text-xl font-bold",
                     agent.trend > 0 ? "text-red-600" : "text-green-600",
                   )}
                 >
-                  {agent.trend > 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+                  {agent.trend > 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                   {agent.trend > 0 ? "+" : ""}
                   {agent.trend.toFixed(2)}%
                 </p>
@@ -139,10 +139,10 @@ export function AgentDetailModal({ open, onOpenChange, agent }: AgentDetailModal
           </div>
 
           <Tabs defaultValue="trend" className="w-full">
-            <TabsList className="w-full justify-start bg-muted/50">
-              <TabsTrigger value="trend">오류율 추이</TabsTrigger>
-              <TabsTrigger value="items">항목별 분석</TabsTrigger>
-              <TabsTrigger value="summary">취약/우수 항목</TabsTrigger>
+            <TabsList className="w-full justify-start bg-slate-100 p-1">
+              <TabsTrigger value="trend" className="data-[state=active]:bg-white text-sm">오류율 추이</TabsTrigger>
+              <TabsTrigger value="items" className="data-[state=active]:bg-white text-sm">항목별 분석</TabsTrigger>
+              <TabsTrigger value="summary" className="data-[state=active]:bg-white text-sm">취약/우수 항목</TabsTrigger>
             </TabsList>
 
             <TabsContent value="trend" className="mt-4">
@@ -186,44 +186,93 @@ export function AgentDetailModal({ open, onOpenChange, agent }: AgentDetailModal
             </TabsContent>
 
             <TabsContent value="items" className="mt-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">항목별 오류 현황</CardTitle>
+              <Card className="border-slate-200">
+                <CardHeader className="pb-2 border-b border-slate-100">
+                  <CardTitle className="text-base">항목별 오류 현황 (16개 항목)</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="h-[350px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={itemErrorData} layout="vertical" margin={{ left: 100, right: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                        <XAxis type="number" tick={{ fill: "#6b7280", fontSize: 11 }} />
-                        <YAxis dataKey="name" type="category" tick={{ fill: "#374151", fontSize: 11 }} width={100} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: "#fff",
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "8px",
-                          }}
-                          formatter={(value, name, props) => [value, props.payload.fullName]}
-                        />
-                        <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                          {itemErrorData.map((entry, index) => (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={entry.category === "상담태도" ? COLORS.attitude : COLORS.consult}
-                            />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                <CardContent className="p-0">
+                  <div className="max-h-[450px] overflow-y-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-slate-50">
+                        <TableRow className="hover:bg-slate-50">
+                          <TableHead className="w-[60px] text-xs text-center">분류</TableHead>
+                          <TableHead className="text-xs">평가항목</TableHead>
+                          <TableHead className="w-[80px] text-xs text-right">오류건수</TableHead>
+                          <TableHead className="w-[80px] text-xs text-right">오류율</TableHead>
+                          <TableHead className="w-[90px] text-xs text-right">전일대비</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {itemErrorData.map((item, index) => {
+                          const errorRate = (item.count / 10 * 2.5).toFixed(2)
+                          const dailyChange = (Math.random() * 2 - 1).toFixed(2)
+                          const isIncrease = Number(dailyChange) > 0
+
+                          return (
+                            <TableRow
+                              key={item.name}
+                              className={cn(
+                                "hover:bg-slate-50",
+                                index % 2 === 1 && "bg-slate-50/50"
+                              )}
+                            >
+                              <TableCell className="text-center py-2.5">
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "text-[10px] px-1.5 py-0.5 font-medium",
+                                    item.category === "상담태도"
+                                      ? "border-[#1e3a5f] text-[#1e3a5f] bg-[#1e3a5f]/5"
+                                      : "border-[#f59e0b] text-[#f59e0b] bg-[#f59e0b]/5"
+                                  )}
+                                >
+                                  {item.category === "상담태도" ? "태도" : "업무"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="py-2.5">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      "h-2 w-2 rounded-full flex-shrink-0",
+                                      item.category === "상담태도" ? "bg-[#1e3a5f]" : "bg-[#f59e0b]"
+                                    )}
+                                  />
+                                  <span className="text-sm text-slate-700">{item.fullName}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right py-2.5">
+                                <span className="text-sm font-medium text-slate-900">{item.count}건</span>
+                              </TableCell>
+                              <TableCell className="text-right py-2.5">
+                                <span className="text-sm font-semibold text-slate-900">{errorRate}%</span>
+                              </TableCell>
+                              <TableCell className="text-right py-2.5">
+                                <span className={cn(
+                                  "text-sm font-medium inline-flex items-center gap-0.5",
+                                  isIncrease ? "text-red-600" : "text-green-600"
+                                )}>
+                                  {isIncrease ? (
+                                    <TrendingUp className="h-3 w-3" />
+                                  ) : (
+                                    <TrendingDown className="h-3 w-3" />
+                                  )}
+                                  {isIncrease ? "+" : ""}{dailyChange}%
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
-                  <div className="mt-4 flex items-center justify-center gap-6 text-sm">
+                  <div className="p-3 border-t border-slate-100 flex items-center justify-center gap-6 text-xs bg-slate-50/50">
                     <div className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded" style={{ backgroundColor: COLORS.attitude }} />
-                      <span>상담태도</span>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 border-[#1e3a5f] text-[#1e3a5f] bg-[#1e3a5f]/5">태도</Badge>
+                      <span className="text-slate-600">상담태도 (5개)</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded" style={{ backgroundColor: COLORS.consult }} />
-                      <span>오상담/오처리</span>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 border-[#f59e0b] text-[#f59e0b] bg-[#f59e0b]/5">업무</Badge>
+                      <span className="text-slate-600">오상담/오처리 (11개)</span>
                     </div>
                   </div>
                 </CardContent>
@@ -232,25 +281,25 @@ export function AgentDetailModal({ open, onOpenChange, agent }: AgentDetailModal
 
             <TabsContent value="summary" className="mt-4">
               <div className="grid gap-4 md:grid-cols-2">
-                <Card className="border-red-200 bg-red-50/50">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 text-base text-red-700">
-                      <AlertTriangle className="h-5 w-5" />
+                <Card className="border-red-200 bg-red-50/30">
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="flex items-center gap-2 text-sm font-semibold text-red-700">
+                      <AlertTriangle className="h-4 w-4" />
                       취약 항목 TOP 3
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent className="space-y-3 px-4 pb-4">
                     {weakItems.map((item, i) => (
                       <div key={item.name} className="space-y-1.5">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium text-gray-700">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-xs font-medium text-slate-700 leading-tight flex-1 min-w-0">
                             {i + 1}. {item.fullName}
                           </span>
-                          <span className="font-mono text-red-600 font-semibold">{item.count}건</span>
+                          <span className="text-xs font-bold text-red-600 whitespace-nowrap">{item.count}건</span>
                         </div>
-                        <div className="h-2 w-full rounded-full bg-red-100">
+                        <div className="h-1.5 w-full rounded-full bg-red-100">
                           <div
-                            className="h-2 rounded-full bg-red-500 transition-all"
+                            className="h-1.5 rounded-full bg-red-500 transition-all"
                             style={{ width: `${(item.count / 10) * 100}%` }}
                           />
                         </div>
@@ -259,25 +308,25 @@ export function AgentDetailModal({ open, onOpenChange, agent }: AgentDetailModal
                   </CardContent>
                 </Card>
 
-                <Card className="border-green-200 bg-green-50/50">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 text-base text-green-700">
-                      <CheckCircle className="h-5 w-5" />
+                <Card className="border-green-200 bg-green-50/30">
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="flex items-center gap-2 text-sm font-semibold text-green-700">
+                      <CheckCircle className="h-4 w-4" />
                       우수 항목 TOP 3
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent className="space-y-3 px-4 pb-4">
                     {strongItems.map((item, i) => (
                       <div key={item.name} className="space-y-1.5">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium text-gray-700">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-xs font-medium text-slate-700 leading-tight flex-1 min-w-0">
                             {i + 1}. {item.fullName}
                           </span>
-                          <span className="font-mono text-green-600 font-semibold">{item.count}건</span>
+                          <span className="text-xs font-bold text-green-600 whitespace-nowrap">{item.count}건</span>
                         </div>
-                        <div className="h-2 w-full rounded-full bg-green-100">
+                        <div className="h-1.5 w-full rounded-full bg-green-100">
                           <div
-                            className="h-2 rounded-full bg-green-500 transition-all"
+                            className="h-1.5 rounded-full bg-green-500 transition-all"
                             style={{ width: `${100 - (item.count / 10) * 100}%` }}
                           />
                         </div>

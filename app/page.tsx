@@ -9,6 +9,7 @@ import { FocusManagement } from "@/components/qc/focus"
 import { AnalyticsReports } from "@/components/qc/reports"
 import { GoalManagement } from "@/components/qc/goals"
 import { SettingsPage } from "@/components/qc/settings"
+import { Predictions } from "@/components/qc/predictions"
 import { cn } from "@/lib/utils"
 
 export default function QCManagementApp() {
@@ -29,6 +30,8 @@ export default function QCManagementApp() {
     switch (currentTab) {
       case "dashboard":
         return <Dashboard onNavigateToFocus={handleNavigateToFocus} />
+      case "predictions":
+        return <Predictions onNavigateToFocus={handleNavigateToFocus} />
       case "agents":
         return <AgentAnalysis />
       case "focus":
