@@ -6,7 +6,7 @@ import { AgentFilters } from "./agent-filters"
 import { AgentTable } from "./agent-table"
 import { AgentDetailModal } from "./agent-detail-modal"
 import { useAgents } from "@/hooks/use-agents"
-import { Loader2 } from "lucide-react"
+import { Users, TrendingDown, AlertTriangle, CheckCircle, Loader2 } from "lucide-react"
 
 export function AgentAnalysis() {
   const [search, setSearch] = useState("")
@@ -71,51 +71,87 @@ export function AgentAnalysis() {
 
   return (
     <div className="space-y-6">
+      {/* 헤더 */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">상담사 분석</h1>
+        <p className="text-sm text-slate-500">센터별, 서비스별, 채널별, 근속기간별 상담사 현황을 확인합니다.</p>
+      </div>
+
       {error && (
         <div className="bg-destructive/10 text-destructive px-4 py-2 rounded-md text-sm">
           <strong>데이터 로드 오류:</strong> {error}
         </div>
       )}
-      
+
       {loading && (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin mr-2" />
           <span>데이터 로딩 중...</span>
         </div>
       )}
-      
+
+      {/* 통계 카드 */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-sm text-muted-foreground">필터된 상담사</div>
-            <p className="text-2xl font-bold">{filteredAgents.length}명</p>
+        <Card className="bg-white border border-slate-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-500">필터된 상담사</p>
+                <p className="text-3xl font-bold text-slate-900">{filteredAgents.length}<span className="text-lg font-normal text-slate-500">명</span></p>
+              </div>
+              <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center">
+                <Users className="h-5 w-5 text-slate-600" />
+              </div>
+            </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-sm text-muted-foreground">평균 오류율</div>
-            <p className="text-2xl font-bold">{stats.avgErrorRate.toFixed(2)}%</p>
+        <Card className="bg-white border border-slate-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-500">평균 오류율</p>
+                <p className="text-3xl font-bold text-slate-900">{stats.avgErrorRate.toFixed(2)}<span className="text-lg font-normal text-slate-500">%</span></p>
+              </div>
+              <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center">
+                <TrendingDown className="h-5 w-5 text-blue-600" />
+              </div>
+            </div>
           </CardContent>
         </Card>
-        <Card className="border-red-300 bg-red-50">
-          <CardContent className="p-4">
-            <div className="text-sm text-muted-foreground">위험</div>
-            <p className="text-2xl font-bold text-red-600">{stats.riskCount}명</p>
+        <Card className="bg-red-50/50 border border-red-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-500">위험</p>
+                <p className="text-3xl font-bold text-red-600">{stats.riskCount}<span className="text-lg font-normal text-slate-500">명</span></p>
+              </div>
+              <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+              </div>
+            </div>
           </CardContent>
         </Card>
-        <Card className="border-green-300 bg-green-50">
-          <CardContent className="p-4">
-            <div className="text-sm text-muted-foreground">양호</div>
-            <p className="text-2xl font-bold text-green-600">{stats.safeCount}명</p>
+        <Card className="bg-green-50/50 border border-green-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-500">양호</p>
+                <p className="text-3xl font-bold text-green-600">{stats.safeCount}<span className="text-lg font-normal text-slate-500">명</span></p>
+              </div>
+              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="pb-4">
-          <CardTitle>상담사 목록</CardTitle>
+      {/* 상담사 목록 */}
+      <Card className="bg-white border border-slate-200">
+        <CardHeader className="pb-4 border-b border-slate-100">
+          <CardTitle className="text-lg text-slate-900">상담사 목록</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="pt-4 space-y-4">
           <AgentFilters
             search={search}
             onSearchChange={setSearch}

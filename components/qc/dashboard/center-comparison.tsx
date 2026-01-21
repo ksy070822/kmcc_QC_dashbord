@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { cn, getStatusColors, getStatusColor } from "@/lib/utils"
 import { Building2, TrendingDown, TrendingUp } from "lucide-react"
 
 interface CenterData {
@@ -22,16 +22,13 @@ interface CenterComparisonProps {
   centers: CenterData[]
 }
 
-function ColoredProgress({ value, errorRate }: { value: number; errorRate: number }) {
-  const getColor = () => {
-    if (errorRate > 5) return "bg-red-500"
-    if (errorRate > 3) return "bg-amber-500"
-    return "bg-emerald-500"
-  }
+// 5단계 색상 체계: 녹색=달성, 파랑=순항, 노랑=주의, 주황=경고, 레드=위험
+function ColoredProgress({ value, errorRate, targetRate = 3.0 }: { value: number; errorRate: number; targetRate?: number }) {
+  const status = getStatusColors(errorRate, targetRate)
 
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
-      <div className={cn("h-full transition-all", getColor())} style={{ width: `${Math.min(value, 100)}%` }} />
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className={cn("h-full transition-all", status.bg)} style={{ width: `${Math.min(value, 100)}%` }} />
     </div>
   )
 }
@@ -84,29 +81,23 @@ export function CenterComparison({ centers }: CenterComparisonProps) {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {center.groups.map((group) => (
-              <div key={group.name} className="space-y-1.5">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-foreground">{group.name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">{group.agentCount}명</span>
-                    <span
-                      className={cn(
-                        "font-mono font-semibold",
-                        group.errorRate > 5
-                          ? "text-red-600"
-                          : group.errorRate > 3
-                            ? "text-amber-600"
-                            : "text-emerald-600",
-                      )}
-                    >
-                      {group.errorRate.toFixed(2)}%
-                    </span>
+            {center.groups.map((group) => {
+              const status = getStatusColors(group.errorRate, center.targetRate)
+              return (
+                <div key={group.name} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-foreground">{group.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">{group.agentCount}명</span>
+                      <span className={cn("font-mono font-semibold", status.text)}>
+                        {group.errorRate.toFixed(2)}%
+                      </span>
+                    </div>
                   </div>
+                  <ColoredProgress value={(group.errorRate / 10) * 100} errorRate={group.errorRate} targetRate={center.targetRate} />
                 </div>
-                <ColoredProgress value={(group.errorRate / 10) * 100} errorRate={group.errorRate} />
-              </div>
-            ))}
+              )
+            })}
           </CardContent>
         </Card>
       ))}
