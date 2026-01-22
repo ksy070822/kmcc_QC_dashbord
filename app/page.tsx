@@ -10,6 +10,7 @@ import { AnalyticsReports } from "@/components/qc/reports"
 import { GoalManagement } from "@/components/qc/goals"
 import { SettingsPage } from "@/components/qc/settings"
 import { Predictions } from "@/components/qc/predictions"
+import { AIAssistant } from "@/components/qc/ai-assistant"
 import { cn } from "@/lib/utils"
 
 export default function QCManagementApp() {
@@ -42,6 +43,8 @@ export default function QCManagementApp() {
         return <Predictions onNavigateToFocus={handleNavigateToFocus} />
       case "agents":
         return <AgentAnalysis />
+      case "ai-assistant":
+        return <AIAssistant />
       case "focus":
         return <FocusManagement />
       case "reports":

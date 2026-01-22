@@ -30,21 +30,32 @@ export function FocusManagement() {
 
   // WatchlistAgent 형식으로 변환
   const watchlistAgents: WatchlistAgent[] = useMemo(() => {
-    return (watchlistData || []).map((agent) => ({
-      id: `${agent.agentId}_${agent.service}_${agent.channel}`, // 고유 키 생성
-      name: agent.agentName,
-      center: agent.center,
-      group: `${agent.service}/${agent.channel}`,
-      channel: agent.channel,
-      tenure: "분석 중", // TODO: tenure 정보 추가 필요
-      attitudeRate: agent.attitudeRate,
-      counselingRate: agent.opsRate,
-      errorRate: agent.totalRate,
-      trend: 0, // TODO: 전주 대비 계산
-      daysOnList: 1, // TODO: 등록일 기반 계산
-      mainIssue: agent.topErrors[0] || agent.reason,
-      actionPlanStatus: "none" as const, // TODO: action plan 상태 연동
-    }))
+    return (watchlistData || []).map((agent) => {
+      // 근속기간 정보가 없으면 빈 문자열로 설정 (테이블에서 "-"로 표시되지 않도록)
+      const tenure = "" // TODO: 실제 tenure 정보를 BigQuery에서 가져와야 함
+      
+      // 주요이슈: topErrors 배열에서 첫 번째 항목 사용, 없으면 reason 사용
+      const mainIssue = agent.topErrors && agent.topErrors.length > 0 
+        ? agent.topErrors[0] 
+        : agent.reason || "오류율 기준 초과"
+      
+      return {
+        id: `${agent.agentId}_${agent.service}_${agent.channel}`, // 고유 키 생성
+        agentId: agent.agentId,
+        name: agent.agentName,
+        center: agent.center,
+        group: `${agent.service}/${agent.channel}`,
+        channel: agent.channel,
+        tenure: tenure || "-", // 근속기간 정보가 없으면 "-" 표시
+        attitudeRate: agent.attitudeRate,
+        counselingRate: agent.opsRate,
+        errorRate: agent.totalRate,
+        trend: agent.trend || 0, // 전월 대비 증감율 (BigQuery에서 계산됨)
+        daysOnList: 1, // TODO: 등록일 기반 계산
+        mainIssue: mainIssue,
+        actionPlanStatus: "none" as const, // TODO: action plan 상태 연동
+      }
+    })
   }, [watchlistData])
 
   const filteredAgents = useMemo(() => {

@@ -1,49 +1,108 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { evaluationItems } from "@/lib/mock-data"
 import { cn } from "@/lib/utils"
+import { useDailyErrors } from "@/hooks/use-daily-errors"
+import { Loader2 } from "lucide-react"
 
 const NAVY = "#1e3a5f"
 const KAKAO = "#f9e000"
 
-// 일자별 데이터 생성
-const generateDailyData = () => {
-  const data = []
-  const today = new Date()
-
-  for (let i = 29; i >= 0; i--) {
-    const date = new Date(today)
-    date.setDate(date.getDate() - i)
-    const dayData: Record<string, number | string> = {
-      date: `${date.getMonth() + 1}/${date.getDate()}`,
-      fullDate: date.toISOString().split("T")[0],
-      total: 0,
-    }
-
-    evaluationItems.forEach((item) => {
-      const count = Math.floor(Math.random() * 20)
-      dayData[item.id] = count
-      dayData.total = (dayData.total as number) + count
-    })
-
-    data.push(dayData)
-  }
-
-  return data
-}
-
 export function DailyErrorTable() {
   const [category, setCategory] = useState<"all" | "상담태도" | "오상담/오처리">("all")
-  const dailyData = generateDailyData()
+  
+  // 최근 30일 데이터 가져오기
+  const endDate = new Date().toISOString().split("T")[0]
+  const startDate = new Date()
+  startDate.setDate(startDate.getDate() - 30)
+  const startDateStr = startDate.toISOString().split("T")[0]
+  
+  const { data: dailyErrorsData, loading, error } = useDailyErrors({
+    startDate: startDateStr,
+    endDate,
+  })
+
+  // 데이터 변환: API 데이터를 테이블 형식으로 변환
+  const dailyData = useMemo(() => {
+    if (!dailyErrorsData || dailyErrorsData.length === 0) {
+      return []
+    }
+
+    // 날짜별로 그룹화된 데이터를 항목별로 변환
+    const dateMap = new Map<string, Record<string, number | string>>()
+    
+    dailyErrorsData.forEach((dayData) => {
+      const date = new Date(dayData.date)
+      const dateKey = `${date.getMonth() + 1}/${date.getDate()}`
+      const fullDate = dayData.date
+      
+      if (!dateMap.has(fullDate)) {
+        dateMap.set(fullDate, {
+          date: dateKey,
+          fullDate,
+          total: 0,
+        })
+        
+        // 모든 항목을 0으로 초기화
+        evaluationItems.forEach((item) => {
+          dateMap.get(fullDate)![item.id] = 0
+        })
+      }
+      
+      // 각 항목의 오류 건수 추가
+      dayData.items.forEach((item) => {
+        const itemId = item.itemId
+        if (dateMap.get(fullDate)![itemId] !== undefined) {
+          dateMap.get(fullDate)![itemId] = item.errorCount
+          dateMap.get(fullDate)!.total = (dateMap.get(fullDate)!.total as number) + item.errorCount
+        }
+      })
+    })
+    
+    return Array.from(dateMap.values()).sort((a, b) => 
+      new Date(a.fullDate as string).getTime() - new Date(b.fullDate as string).getTime()
+    )
+  }, [dailyErrorsData])
 
   const filteredItems =
     category === "all" ? evaluationItems : evaluationItems.filter((item) => item.category === category)
 
   // 최근 14일만 표시
   const recentData = dailyData.slice(-14)
+
+  if (loading) {
+    return (
+      <Card className="border-slate-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg font-semibold text-slate-800">일자별 오류 현황</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin mr-2" />
+            <span className="text-slate-600">데이터 로딩 중...</span>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="border-slate-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg font-semibold text-slate-800">일자별 오류 현황</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-red-600">
+            데이터 로딩 실패: {error}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card className="border-slate-200">

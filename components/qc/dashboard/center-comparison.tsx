@@ -75,7 +75,7 @@ export function CenterComparison({ centers }: CenterComparisonProps) {
               <span
                 className={cn(
                   "flex items-center gap-1 font-medium",
-                  center.trend < 0 ? "text-emerald-600" : "text-red-600",
+                  center.trend < 0 ? "text-emerald-600" : center.trend > 0 ? "text-red-600" : "text-slate-500",
                 )}
               >
                 {center.trend < 0 ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}

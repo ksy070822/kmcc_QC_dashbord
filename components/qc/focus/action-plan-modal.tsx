@@ -39,7 +39,7 @@ export function ActionPlanModal({ open, onOpenChange, agent, onSave }: ActionPla
     if (!agent || !issue || !plan || !targetDate) return
 
     onSave({
-      agentId: agent.id,
+      agentId: agent.agentId,
       issue,
       plan,
       targetDate,
@@ -76,16 +76,20 @@ export function ActionPlanModal({ open, onOpenChange, agent, onSave }: ActionPla
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-lg font-semibold text-slate-900">{agent.name}</span>
+                    <span className="text-lg font-semibold text-slate-900">
+                      {agent.name} ({agent.agentId})
+                    </span>
                     <Badge variant="outline" className="bg-white border-slate-200">
                       {agent.center} {agent.group}
                     </Badge>
                     <Badge variant="outline" className="bg-white border-slate-200">
                       {agent.channel}
                     </Badge>
-                    <Badge variant="outline" className="bg-white border-slate-200">
-                      {agent.tenure}
-                    </Badge>
+                    {agent.tenure && agent.tenure !== "-" && (
+                      <Badge variant="outline" className="bg-white border-slate-200">
+                        {agent.tenure}
+                      </Badge>
+                    )}
                   </div>
                   <div className="mt-1 flex items-center gap-4 text-sm text-slate-500 flex-wrap">
                     <span>태도: {agent.attitudeRate?.toFixed(2) || "0.00"}%</span>

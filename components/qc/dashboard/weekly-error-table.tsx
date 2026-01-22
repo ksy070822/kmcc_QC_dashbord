@@ -1,51 +1,105 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { evaluationItems } from "@/lib/mock-data"
 import { cn } from "@/lib/utils"
-import { TrendingUp, TrendingDown, Minus } from "lucide-react"
-
-// 주차별 데이터 생성
-const generateWeeklyData = () => {
-  const weeks = [
-    { id: "w1", label: "10/2~10/8", shortLabel: "10월 1주" },
-    { id: "w2", label: "10/9~10/15", shortLabel: "10월 2주" },
-    { id: "w3", label: "10/16~10/22", shortLabel: "10월 3주" },
-    { id: "w4", label: "10/23~10/29", shortLabel: "10월 4주" },
-    { id: "w5", label: "10/30~11/5", shortLabel: "10월 5주" },
-    { id: "w6", label: "11/6~11/12", shortLabel: "11월 1주" },
-  ]
-
-  const data: Record<string, Record<string, { count: number; rate: number }>> = {}
-
-  evaluationItems.forEach((item) => {
-    data[item.id] = {}
-    weeks.forEach((week, idx) => {
-      const count = Math.floor(Math.random() * 150) + 20
-      const rate = Number((Math.random() * 30 + 1).toFixed(1))
-      data[item.id][week.id] = { count, rate }
-    })
-  })
-
-  return { weeks, data }
-}
+import { TrendingUp, TrendingDown, Minus, Loader2 } from "lucide-react"
+import { useWeeklyErrors } from "@/hooks/use-weekly-errors"
 
 export function WeeklyErrorTable() {
   const [category, setCategory] = useState<"all" | "상담태도" | "오상담/오처리">("all")
-  const { weeks, data } = generateWeeklyData()
+  
+  // 최근 6주 데이터 가져오기
+  const endDate = new Date().toISOString().split("T")[0]
+  const startDate = new Date()
+  startDate.setDate(startDate.getDate() - 42) // 6주
+  const startDateStr = startDate.toISOString().split("T")[0]
+  
+  const { data: weeklyErrorsData, loading, error } = useWeeklyErrors({
+    startDate: startDateStr,
+    endDate,
+  })
+
+  // 데이터 변환: API 데이터를 테이블 형식으로 변환
+  const { weeks, data } = useMemo(() => {
+    if (!weeklyErrorsData || weeklyErrorsData.length === 0) {
+      return { weeks: [], data: {} }
+    }
+
+    // 주차 정보 생성
+    const weeksList = weeklyErrorsData.map((weekData, idx) => ({
+      id: `w${idx + 1}`,
+      label: weekData.weekLabel,
+      shortLabel: weekData.weekLabel,
+      week: weekData.week,
+    }))
+
+    // 항목별 주차별 데이터 생성
+    const itemData: Record<string, Record<string, { count: number; rate: number }>> = {}
+    
+    evaluationItems.forEach((item) => {
+      itemData[item.id] = {}
+      weeksList.forEach((week, weekIdx) => {
+        const weekData = weeklyErrorsData[weekIdx]
+        const itemError = weekData.items.find((i) => i.itemId === item.id)
+        itemData[item.id][week.id] = {
+          count: itemError?.errorCount || 0,
+          rate: itemError?.errorRate || 0,
+        }
+      })
+    })
+
+    return { weeks: weeksList, data: itemData }
+  }, [weeklyErrorsData])
 
   const filteredItems =
     category === "all" ? evaluationItems : evaluationItems.filter((item) => item.category === category)
 
   // 전주 대비 계산
   const getComparison = (itemId: string) => {
-    const currentWeek = data[itemId]["w6"]
-    const prevWeek = data[itemId]["w5"]
+    if (weeks.length < 2 || !data[itemId]) {
+      return { countChange: 0, rateChange: 0 }
+    }
+    const lastWeekId = weeks[weeks.length - 1].id
+    const prevWeekId = weeks[weeks.length - 2].id
+    const currentWeek = data[itemId][lastWeekId] || { count: 0, rate: 0 }
+    const prevWeek = data[itemId][prevWeekId] || { count: 0, rate: 0 }
     const countChange = currentWeek.count - prevWeek.count
     const rateChange = Number((currentWeek.rate - prevWeek.rate).toFixed(1))
     return { countChange, rateChange }
+  }
+
+  if (loading) {
+    return (
+      <Card className="border-slate-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg font-semibold text-slate-800">주차별 오류 현황</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin mr-2" />
+            <span className="text-slate-600">데이터 로딩 중...</span>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="border-slate-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg font-semibold text-slate-800">주차별 오류 현황</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-red-600">
+            데이터 로딩 실패: {error}
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (

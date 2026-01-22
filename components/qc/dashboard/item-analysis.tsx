@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -18,8 +18,9 @@ import {
   Legend,
 } from "recharts"
 import { evaluationItems } from "@/lib/mock-data"
-import { TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { TrendingUp, TrendingDown, Minus, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useItemStats } from "@/hooks/use-item-stats"
 
 interface ItemAnalysisProps {
   selectedCenter: string
@@ -33,42 +34,51 @@ const NAVY_LIGHT = "#2d4a6f"
 const KAKAO = "#f9e000"
 const KAKAO_DARK = "#e6ce00"
 
-// 목업 항목별 데이터 생성
-const generateItemData = (center: string, service: string, channel: string, tenure: string) => {
-  return evaluationItems.map((item, idx) => ({
-    id: item.id,
-    name: item.name,
-    shortName: item.shortName,
-    category: item.category,
-    errorRate: Number((Math.random() * 3 + 0.5).toFixed(2)),
-    errorCount: Math.floor(Math.random() * 30) + 5,
-    trend: Number((Math.random() * 2 - 1).toFixed(2)),
-  }))
-}
-
-// 항목별 추이 데이터 생성
-const generateItemTrendData = (itemId: string, days = 14) => {
-  const data = []
-  const today = new Date()
-
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date(today)
-    date.setDate(date.getDate() - i)
-    data.push({
-      date: `${date.getMonth() + 1}/${date.getDate()}`,
-      용산: Number((Math.random() * 2 + 0.5).toFixed(2)),
-      광주: Number((Math.random() * 2 + 0.3).toFixed(2)),
-    })
-  }
-
-  return data
-}
-
 export function ItemAnalysis({ selectedCenter, selectedService, selectedChannel, selectedTenure }: ItemAnalysisProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [selectedItem, setSelectedItem] = useState<string | null>(null)
 
-  const itemData = generateItemData(selectedCenter, selectedService, selectedChannel, selectedTenure)
+  // 최근 14일 데이터 가져오기
+  const endDate = new Date().toISOString().split("T")[0]
+  const startDate = new Date()
+  startDate.setDate(startDate.getDate() - 14)
+  const startDateStr = startDate.toISOString().split("T")[0]
+
+  const { data: itemStatsData, loading, error } = useItemStats({
+    center: selectedCenter !== "all" ? selectedCenter : undefined,
+    service: selectedService !== "all" ? selectedService : undefined,
+    channel: selectedChannel !== "all" ? selectedChannel : undefined,
+    startDate: startDateStr,
+    endDate,
+  })
+
+  // 데이터 변환: API 데이터를 컴포넌트 형식으로 변환
+  const itemData = useMemo(() => {
+    if (!itemStatsData || itemStatsData.length === 0) {
+      return evaluationItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        shortName: item.shortName,
+        category: item.category,
+        errorRate: 0,
+        errorCount: 0,
+        trend: 0,
+      }))
+    }
+
+    return evaluationItems.map((item) => {
+      const stats = itemStatsData.find((s) => s.itemId === item.id)
+      return {
+        id: item.id,
+        name: item.name,
+        shortName: item.shortName,
+        category: item.category,
+        errorRate: stats?.errorRate || 0,
+        errorCount: stats?.errorCount || 0,
+        trend: stats?.trend || 0,
+      }
+    })
+  }, [itemStatsData])
 
   const filteredItems =
     selectedCategory === "all" ? itemData : itemData.filter((item) => item.category === selectedCategory)
@@ -76,7 +86,39 @@ export function ItemAnalysis({ selectedCenter, selectedService, selectedChannel,
   const attitudeItems = itemData.filter((item) => item.category === "상담태도")
   const processItems = itemData.filter((item) => item.category === "오상담/오처리")
 
-  const selectedItemTrend = selectedItem ? generateItemTrendData(selectedItem) : null
+  // 항목별 추이 데이터는 일단 빈 배열로 설정 (추후 구현 가능)
+  const selectedItemTrend = selectedItem ? [] : null
+
+  if (loading) {
+    return (
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg text-slate-800">평가항목별 현황</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin mr-2" />
+            <span className="text-slate-600">데이터 로딩 중...</span>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg text-slate-800">평가항목별 현황</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-red-600">
+            데이터 로딩 실패: {error}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card className="border-slate-200 shadow-sm">
@@ -270,32 +312,9 @@ export function ItemAnalysis({ selectedCenter, selectedService, selectedChannel,
                 </SelectContent>
               </Select>
 
-              {selectedItemTrend ? (
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={selectedItemTrend} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 12 }} />
-                      <YAxis tickFormatter={(v) => `${v}%`} tick={{ fill: "#64748b", fontSize: 12 }} />
-                      <Tooltip
-                        formatter={(value: number) => [`${value.toFixed(2)}%`, ""]}
-                        contentStyle={{
-                          backgroundColor: "#fff",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: "8px",
-                        }}
-                      />
-                      <Legend />
-                      <Line type="monotone" dataKey="용산" stroke={NAVY} strokeWidth={2.5} dot={{ fill: NAVY, r: 4 }} />
-                      <Line
-                        type="monotone"
-                        dataKey="광주"
-                        stroke={KAKAO}
-                        strokeWidth={2.5}
-                        dot={{ fill: KAKAO, r: 4, stroke: "#333", strokeWidth: 1 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+              {selectedItem ? (
+                <div className="h-[300px] flex items-center justify-center text-slate-400">
+                  추이 데이터는 추후 구현 예정입니다
                 </div>
               ) : (
                 <div className="h-[300px] flex items-center justify-center text-slate-400">

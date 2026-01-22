@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { OverviewSection } from "./overview-section"
 import { CenterComparison } from "./center-comparison"
 import { ErrorTrendChart } from "./error-trend-chart"
@@ -36,18 +36,127 @@ export function Dashboard({ onNavigateToFocus, selectedDate }: DashboardProps) {
   // Firebase에서 실제 데이터 가져오기 (selectedDate 전달)
   const { stats, centerStats, trendData, loading, error, refresh } = useDashboardData(selectedDate)
 
+  // 전일 대비 트렌드 계산
+  const [trends, setTrends] = useState({
+    attitudeTrend: 0,
+    consultTrend: 0,
+    overallTrend: 0,
+  })
+
+  useEffect(() => {
+    const calculateTrends = async () => {
+      if (!stats) return
+      
+      try {
+        // 전일 날짜 계산
+        const currentDate = new Date(selectedDate || new Date().toISOString().split('T')[0])
+        const previousDate = new Date(currentDate)
+        previousDate.setDate(previousDate.getDate() - 1)
+        const previousDateStr = previousDate.toISOString().split('T')[0]
+        
+        // 전일 데이터 조회
+        const response = await fetch(`/api/data?type=dashboard&date=${previousDateStr}`)
+        const result = await response.json()
+        
+        if (result.success && result.data) {
+          const previousStats = result.data
+          
+          // 전일 대비 변화율 계산 (percentage point)
+          const attitudeTrend = Number((stats.attitudeErrorRate - previousStats.attitudeErrorRate).toFixed(2))
+          const consultTrend = Number((stats.businessErrorRate - previousStats.businessErrorRate).toFixed(2))
+          const overallTrend = Number((stats.overallErrorRate - previousStats.overallErrorRate).toFixed(2))
+          
+          setTrends({
+            attitudeTrend,
+            consultTrend,
+            overallTrend,
+          })
+        } else {
+          // 전일 데이터가 없으면 0으로 설정
+          setTrends({
+            attitudeTrend: 0,
+            consultTrend: 0,
+            overallTrend: 0,
+          })
+        }
+      } catch (err) {
+        console.error('Failed to calculate trends:', err)
+        setTrends({
+          attitudeTrend: 0,
+          consultTrend: 0,
+          overallTrend: 0,
+        })
+      }
+    }
+    
+    calculateTrends()
+  }, [stats, selectedDate])
+
   // 로딩 중이거나 데이터가 없으면 기본값 사용
   const dashboardStats = stats || defaultStats
 
   // 트렌드 차트 데이터 (실제 데이터 사용, 데이터 없으면 mock 사용)
   const chartTrendData = trendData.length > 0 ? trendData : generateTrendData(14) as unknown as TrendData[]
 
+  // 센터별 전일대비 trend 계산
+  const [centerTrends, setCenterTrends] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    const calculateCenterTrends = async () => {
+      if (!centerStats || centerStats.length === 0) return
+      
+      try {
+        // 전일 날짜 계산
+        const currentDate = new Date(selectedDate || new Date().toISOString().split('T')[0])
+        const previousDate = new Date(currentDate)
+        previousDate.setDate(previousDate.getDate() - 1)
+        const previousDateStr = previousDate.toISOString().split('T')[0]
+        
+        // 전일 센터별 데이터 조회
+        const response = await fetch(`/api/data?type=centers&startDate=${previousDateStr}&endDate=${previousDateStr}`)
+        const result = await response.json()
+        
+        if (result.success && result.data) {
+          const prevCenterStats = result.data as Array<{ name: string; errorRate: number }>
+          const trends: Record<string, number> = {}
+          
+          centerStats.forEach(center => {
+            const prevCenter = prevCenterStats.find(c => c.name === center.name)
+            if (prevCenter) {
+              trends[center.name] = Number((center.errorRate - prevCenter.errorRate).toFixed(2))
+            } else {
+              trends[center.name] = 0
+            }
+          })
+          
+          setCenterTrends(trends)
+        } else {
+          // 전일 데이터가 없으면 0으로 설정
+          const trends: Record<string, number> = {}
+          centerStats.forEach(center => {
+            trends[center.name] = 0
+          })
+          setCenterTrends(trends)
+        }
+      } catch (err) {
+        console.error('Failed to calculate center trends:', err)
+        const trends: Record<string, number> = {}
+        centerStats.forEach(center => {
+          trends[center.name] = 0
+        })
+        setCenterTrends(trends)
+      }
+    }
+    
+    calculateCenterTrends()
+  }, [centerStats, selectedDate])
+
   // 센터 데이터 변환 (CenterComparison 컴포넌트용)
   const centerData = centerStats.length > 0
     ? centerStats.map(center => ({
         name: center.name,
         errorRate: center.errorRate,
-        trend: 0, // 트렌드는 별도 계산 필요
+        trend: centerTrends[center.name] || 0,
         targetRate: 3.0,
         groups: center.services.map(svc => ({
           name: svc.name,
@@ -138,11 +247,11 @@ export function Dashboard({ onNavigateToFocus, selectedDate }: DashboardProps) {
         watchlistYongsan={dashboardStats.watchlistYongsan}
         watchlistGwangju={dashboardStats.watchlistGwangju}
         attitudeErrorRate={dashboardStats.attitudeErrorRate}
-        attitudeErrorTrend={0}
+        attitudeErrorTrend={trends.attitudeTrend}
         consultErrorRate={dashboardStats.businessErrorRate}
-        consultErrorTrend={0}
+        consultErrorTrend={trends.consultTrend}
         overallErrorRate={dashboardStats.overallErrorRate}
-        overallErrorTrend={0}
+        overallErrorTrend={trends.overallTrend}
         onWatchlistClick={onNavigateToFocus}
         attitudeErrorByCenter={attitudeErrorByCenter}
         consultErrorByCenter={consultErrorByCenter}

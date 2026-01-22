@@ -534,6 +534,7 @@ export interface WatchListItem {
   attitudeRate: number;
   opsRate: number;
   totalRate: number;
+  trend: number;
   evaluationCount: number;
   reason: string;
   topErrors: string[];
@@ -553,6 +554,12 @@ export async function getWatchList(filters?: {
     let whereClause = 'WHERE 1=1';
     const params: any = { month };
     
+    // 전월 계산
+    const prevMonth = new Date(month + '-01')
+    prevMonth.setMonth(prevMonth.getMonth() - 1)
+    const prevMonthStr = prevMonth.toISOString().slice(0, 7)
+    params.prevMonth = prevMonthStr
+    
     if (filters?.center && filters.center !== 'all') {
       whereClause += ' AND center = @center';
       params.center = filters.center;
@@ -567,8 +574,13 @@ export async function getWatchList(filters?: {
     //   params.tenure = filters.tenure;
     // }
     
+    // 전월 데이터도 가져와서 trend 계산
+    const prevMonth = new Date(month + '-01')
+    prevMonth.setMonth(prevMonth.getMonth() - 1)
+    const prevMonthStr = prevMonth.toISOString().slice(0, 7)
+    
     const query = `
-      WITH agent_errors AS (
+      WITH current_month_errors AS (
         SELECT
           agent_id,
           agent_name,
@@ -580,21 +592,80 @@ export async function getWatchList(filters?: {
           SUM(business_error_count) as ops_errors,
           ROUND(SAFE_DIVIDE(SUM(attitude_error_count), COUNT(*) * 5) * 100, 2) as attitude_rate,
           ROUND(SAFE_DIVIDE(SUM(business_error_count), COUNT(*) * 11) * 100, 2) as ops_rate,
+          SUM(CAST(greeting_error AS INT64)) as greeting_errors,
           SUM(CAST(empathy_error AS INT64)) as empathy_errors,
+          SUM(CAST(apology_error AS INT64)) as apology_errors,
+          SUM(CAST(additional_inquiry_error AS INT64)) as additional_inquiry_errors,
+          SUM(CAST(unkind_error AS INT64)) as unkind_errors,
           SUM(CAST(consult_type_error AS INT64)) as consult_type_errors,
           SUM(CAST(guide_error AS INT64)) as guide_errors,
           SUM(CAST(identity_check_error AS INT64)) as identity_check_errors,
-          SUM(CAST(flag_keyword_error AS INT64)) as flag_keyword_errors
+          SUM(CAST(required_search_error AS INT64)) as required_search_errors,
+          SUM(CAST(wrong_guide_error AS INT64)) as wrong_guide_errors,
+          SUM(CAST(process_missing_error AS INT64)) as process_missing_errors,
+          SUM(CAST(process_incomplete_error AS INT64)) as process_incomplete_errors,
+          SUM(CAST(system_error AS INT64)) as system_errors,
+          SUM(CAST(id_mapping_error AS INT64)) as id_mapping_errors,
+          SUM(CAST(flag_keyword_error AS INT64)) as flag_keyword_errors,
+          SUM(CAST(history_error AS INT64)) as history_errors
         FROM \`${DATASET_ID}.evaluations\`
         WHERE FORMAT_DATE('%Y-%m', evaluation_date) = @month
           ${filters?.center && filters.center !== 'all' ? 'AND center = @center' : ''}
           ${filters?.channel && filters.channel !== 'all' ? 'AND channel = @channel' : ''}
         GROUP BY agent_id, agent_name, center, service, channel
+      ),
+      previous_month_errors AS (
+        SELECT
+          agent_id,
+          agent_name,
+          center,
+          service,
+          channel,
+          ROUND(SAFE_DIVIDE(SUM(attitude_error_count), COUNT(*) * 5) * 100, 2) as prev_attitude_rate,
+          ROUND(SAFE_DIVIDE(SUM(business_error_count), COUNT(*) * 11) * 100, 2) as prev_ops_rate
+        FROM \`${DATASET_ID}.evaluations\`
+        WHERE FORMAT_DATE('%Y-%m', evaluation_date) = @prevMonth
+          ${filters?.center && filters.center !== 'all' ? 'AND center = @center' : ''}
+          ${filters?.channel && filters.channel !== 'all' ? 'AND channel = @channel' : ''}
+        GROUP BY agent_id, agent_name, center, service, channel
       )
-      SELECT *
-      FROM agent_errors
-      WHERE attitude_rate > 5 OR ops_rate > 6
-      ORDER BY (attitude_rate + ops_rate) DESC
+      SELECT
+        c.agent_id,
+        c.agent_name,
+        c.center,
+        c.service,
+        c.channel,
+        c.evaluation_count,
+        c.attitude_errors,
+        c.ops_errors,
+        c.attitude_rate,
+        c.ops_rate,
+        c.greeting_errors,
+        c.empathy_errors,
+        c.apology_errors,
+        c.additional_inquiry_errors,
+        c.unkind_errors,
+        c.consult_type_errors,
+        c.guide_errors,
+        c.identity_check_errors,
+        c.required_search_errors,
+        c.wrong_guide_errors,
+        c.process_missing_errors,
+        c.process_incomplete_errors,
+        c.system_errors,
+        c.id_mapping_errors,
+        c.flag_keyword_errors,
+        c.history_errors,
+        COALESCE(p.prev_attitude_rate, 0) as prev_attitude_rate,
+        COALESCE(p.prev_ops_rate, 0) as prev_ops_rate
+      FROM current_month_errors c
+      LEFT JOIN previous_month_errors p 
+        ON c.agent_id = p.agent_id 
+        AND c.center = p.center 
+        AND c.service = p.service 
+        AND c.channel = p.channel
+      WHERE c.attitude_rate > 5 OR c.ops_rate > 6
+      ORDER BY (c.attitude_rate + c.ops_rate) DESC
     `;
     
     const options = {
@@ -608,14 +679,32 @@ export async function getWatchList(filters?: {
     const result: WatchListItem[] = rows.map((row: any) => {
       const attRate = Number(row.attitude_rate) || 0;
       const opsRate = Number(row.ops_rate) || 0;
+      const prevAttRate = Number(row.prev_attitude_rate) || 0;
+      const prevOpsRate = Number(row.prev_ops_rate) || 0;
       
-      // 주요 오류 항목
+      // 전일대비 증감율 계산 (전월 대비)
+      const totalRate = Number((attRate + opsRate).toFixed(2));
+      const prevTotalRate = Number((prevAttRate + prevOpsRate).toFixed(2));
+      const trend = Number((totalRate - prevTotalRate).toFixed(2));
+      
+      // 주요 오류 항목 (모든 오류 항목 포함)
       const errors = [
-        { name: '공감표현누락', count: Number(row.empathy_errors) || 0 },
-        { name: '상담유형오설정', count: Number(row.consult_type_errors) || 0 },
-        { name: '가이드미준수', count: Number(row.guide_errors) || 0 },
-        { name: '본인확인누락', count: Number(row.identity_check_errors) || 0 },
-        { name: '플래그키워드누락', count: Number(row.flag_keyword_errors) || 0 },
+        { name: '첫인사/끝인사 누락', count: Number(row.greeting_errors) || 0 },
+        { name: '공감표현 누락', count: Number(row.empathy_errors) || 0 },
+        { name: '사과표현 누락', count: Number(row.apology_errors) || 0 },
+        { name: '추가문의 누락', count: Number(row.additional_inquiry_errors) || 0 },
+        { name: '불친절', count: Number(row.unkind_errors) || 0 },
+        { name: '상담유형 오설정', count: Number(row.consult_type_errors) || 0 },
+        { name: '가이드 미준수', count: Number(row.guide_errors) || 0 },
+        { name: '본인확인 누락', count: Number(row.identity_check_errors) || 0 },
+        { name: '필수탐색 누락', count: Number(row.required_search_errors) || 0 },
+        { name: '오안내', count: Number(row.wrong_guide_errors) || 0 },
+        { name: '전산 처리 누락', count: Number(row.process_missing_errors) || 0 },
+        { name: '전산 처리 미완료', count: Number(row.process_incomplete_errors) || 0 },
+        { name: '전산 조작 미흡', count: Number(row.system_errors) || 0 },
+        { name: '콜픽트림ID 매핑 누락', count: Number(row.id_mapping_errors) || 0 },
+        { name: '플래그키워드 누락', count: Number(row.flag_keyword_errors) || 0 },
+        { name: '상담이력 기재 미흡', count: Number(row.history_errors) || 0 },
       ].filter(e => e.count > 0).sort((a, b) => b.count - a.count);
       
       const topErrors = errors.slice(0, 3).map(e => `${e.name}(${e.count})`);
@@ -639,7 +728,8 @@ export async function getWatchList(filters?: {
         channel: row.channel,
         attitudeRate: attRate,
         opsRate: opsRate,
-        totalRate: Number((attRate + opsRate).toFixed(2)),
+        totalRate: totalRate,
+        trend: trend,
         evaluationCount: Number(row.evaluation_count) || 0,
         reason,
         topErrors,
@@ -791,6 +881,881 @@ export async function saveEvaluationsToBigQuery(evaluations: any[]): Promise<{ s
   }
 }
 
+// ============================================
+// 일자별 오류 통계 조회
+// ============================================
+
+export interface DailyErrorData {
+  date: string
+  items: Array<{
+    itemId: string
+    itemName: string
+    errorCount: number
+  }>
+}
+
+export async function getDailyErrors(filters?: {
+  startDate?: string
+  endDate?: string
+  center?: string
+  service?: string
+  channel?: string
+}): Promise<{ success: boolean; data?: DailyErrorData[]; error?: string }> {
+  try {
+    const bigquery = getBigQueryClient()
+    
+    // 기본값: 최근 30일
+    let startDate = filters?.startDate
+    let endDate = filters?.endDate
+    if (!startDate || !endDate) {
+      const now = new Date()
+      endDate = now.toISOString().split('T')[0]
+      const start = new Date(now)
+      start.setDate(start.getDate() - 30)
+      startDate = start.toISOString().split('T')[0]
+    }
+    
+    let whereClause = 'WHERE evaluation_date BETWEEN @startDate AND @endDate'
+    const params: any = { startDate, endDate }
+    
+    if (filters?.center && filters.center !== 'all') {
+      whereClause += ' AND center = @center'
+      params.center = filters.center
+    }
+    if (filters?.service && filters.service !== 'all') {
+      whereClause += ' AND service = @service'
+      params.service = filters.service
+    }
+    if (filters?.channel && filters.channel !== 'all') {
+      whereClause += ' AND channel = @channel'
+      params.channel = filters.channel
+    }
+    
+    // 평가 항목별 일자별 오류 집계
+    const query = `
+      SELECT
+        evaluation_date as date,
+        'att1' as item_id,
+        '첫인사/끝인사 누락' as item_name,
+        SUM(CAST(greeting_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'att2' as item_id,
+        '공감표현 누락' as item_name,
+        SUM(CAST(empathy_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'att3' as item_id,
+        '사과표현 누락' as item_name,
+        SUM(CAST(apology_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'att4' as item_id,
+        '추가문의 누락' as item_name,
+        SUM(CAST(additional_inquiry_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'att5' as item_id,
+        '불친절' as item_name,
+        SUM(CAST(unkind_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err1' as item_id,
+        '상담유형 오설정' as item_name,
+        SUM(CAST(consult_type_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err2' as item_id,
+        '가이드 미준수' as item_name,
+        SUM(CAST(guide_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err3' as item_id,
+        '본인확인 누락' as item_name,
+        SUM(CAST(identity_check_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err4' as item_id,
+        '필수탐색 누락' as item_name,
+        SUM(CAST(required_search_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err5' as item_id,
+        '오안내' as item_name,
+        SUM(CAST(wrong_guide_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err6' as item_id,
+        '전산 처리 누락' as item_name,
+        SUM(CAST(process_missing_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err7' as item_id,
+        '전산 처리 미완료' as item_name,
+        SUM(CAST(process_incomplete_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err8' as item_id,
+        '전산 조작 미흡' as item_name,
+        SUM(CAST(system_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err9' as item_id,
+        '콜픽트림ID 매핑 누락' as item_name,
+        SUM(CAST(id_mapping_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err10' as item_id,
+        '플래그키워드 누락' as item_name,
+        SUM(CAST(flag_keyword_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      UNION ALL
+      
+      SELECT
+        evaluation_date as date,
+        'err11' as item_id,
+        '상담이력 기재 미흡' as item_name,
+        SUM(CAST(history_error AS INT64)) as error_count
+      FROM \`${DATASET_ID}.evaluations\`
+      ${whereClause}
+      GROUP BY evaluation_date
+      
+      ORDER BY date DESC, item_id
+    `
+    
+    const options = {
+      query,
+      params,
+      location: 'asia-northeast3',
+    }
+    
+    const [rows] = await bigquery.query(options)
+    
+    // 날짜별로 그룹화
+    const dateMap = new Map<string, DailyErrorData>()
+    
+    rows.forEach((row: any) => {
+      const date = row.date.value || row.date
+      if (!dateMap.has(date)) {
+        dateMap.set(date, {
+          date,
+          items: [],
+        })
+      }
+      dateMap.get(date)!.items.push({
+        itemId: row.item_id,
+        itemName: row.item_name,
+        errorCount: Number(row.error_count) || 0,
+      })
+    })
+    
+    const result = Array.from(dateMap.values()).sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    )
+    
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('[BigQuery] getDailyErrors error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+// ============================================
+// 주차별 오류 통계 조회
+// ============================================
+
+export interface WeeklyErrorData {
+  week: string
+  weekLabel: string
+  items: Array<{
+    itemId: string
+    itemName: string
+    errorCount: number
+    errorRate: number
+  }>
+}
+
+export async function getWeeklyErrors(filters?: {
+  startDate?: string
+  endDate?: string
+  center?: string
+  service?: string
+  channel?: string
+}): Promise<{ success: boolean; data?: WeeklyErrorData[]; error?: string }> {
+  try {
+    const bigquery = getBigQueryClient()
+    
+    // 기본값: 최근 6주
+    let startDate = filters?.startDate
+    let endDate = filters?.endDate
+    if (!startDate || !endDate) {
+      const now = new Date()
+      endDate = now.toISOString().split('T')[0]
+      const start = new Date(now)
+      start.setDate(start.getDate() - 42) // 6주
+      startDate = start.toISOString().split('T')[0]
+    }
+    
+    let whereClause = 'WHERE evaluation_date BETWEEN @startDate AND @endDate'
+    const params: any = { startDate, endDate }
+    
+    if (filters?.center && filters.center !== 'all') {
+      whereClause += ' AND center = @center'
+      params.center = filters.center
+    }
+    if (filters?.service && filters.service !== 'all') {
+      whereClause += ' AND service = @service'
+      params.service = filters.service
+    }
+    if (filters?.channel && filters.channel !== 'all') {
+      whereClause += ' AND channel = @channel'
+      params.channel = filters.channel
+    }
+    
+    // 주차별 집계 (ISO 주 사용)
+    const query = `
+      WITH weekly_data AS (
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'att1' as item_id,
+          '첫인사/끝인사 누락' as item_name,
+          SUM(CAST(greeting_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'att2' as item_id,
+          '공감표현 누락' as item_name,
+          SUM(CAST(empathy_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'att3' as item_id,
+          '사과표현 누락' as item_name,
+          SUM(CAST(apology_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'att4' as item_id,
+          '추가문의 누락' as item_name,
+          SUM(CAST(additional_inquiry_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'att5' as item_id,
+          '불친절' as item_name,
+          SUM(CAST(unkind_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err1' as item_id,
+          '상담유형 오설정' as item_name,
+          SUM(CAST(consult_type_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err2' as item_id,
+          '가이드 미준수' as item_name,
+          SUM(CAST(guide_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err3' as item_id,
+          '본인확인 누락' as item_name,
+          SUM(CAST(identity_check_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err4' as item_id,
+          '필수탐색 누락' as item_name,
+          SUM(CAST(required_search_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err5' as item_id,
+          '오안내' as item_name,
+          SUM(CAST(wrong_guide_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err6' as item_id,
+          '전산 처리 누락' as item_name,
+          SUM(CAST(process_missing_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err7' as item_id,
+          '전산 처리 미완료' as item_name,
+          SUM(CAST(process_incomplete_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err8' as item_id,
+          '전산 조작 미흡' as item_name,
+          SUM(CAST(system_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err9' as item_id,
+          '콜픽트림ID 매핑 누락' as item_name,
+          SUM(CAST(id_mapping_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err10' as item_id,
+          '플래그키워드 누락' as item_name,
+          SUM(CAST(flag_keyword_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+        
+        UNION ALL
+        
+        SELECT
+          FORMAT_DATE('%Y-W%V', evaluation_date) as week,
+          EXTRACT(YEAR FROM evaluation_date) as year,
+          EXTRACT(WEEK FROM evaluation_date) as week_num,
+          'err11' as item_id,
+          '상담이력 기재 미흡' as item_name,
+          SUM(CAST(history_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        GROUP BY week, year, week_num
+      )
+      SELECT
+        week,
+        year,
+        week_num,
+        item_id,
+        item_name,
+        error_count,
+        ROUND(SAFE_DIVIDE(error_count, total_evaluations) * 100, 1) as error_rate
+      FROM weekly_data
+      ORDER BY year DESC, week_num DESC, item_id
+    `
+    
+    const options = {
+      query,
+      params,
+      location: 'asia-northeast3',
+    }
+    
+    const [rows] = await bigquery.query(options)
+    
+    // 주차별로 그룹화
+    const weekMap = new Map<string, WeeklyErrorData>()
+    
+    rows.forEach((row: any) => {
+      const week = row.week
+      const weekLabel = `${row.year}년 ${row.week_num}주차`
+      
+      if (!weekMap.has(week)) {
+        weekMap.set(week, {
+          week,
+          weekLabel,
+          items: [],
+        })
+      }
+      
+      weekMap.get(week)!.items.push({
+        itemId: row.item_id,
+        itemName: row.item_name,
+        errorCount: Number(row.error_count) || 0,
+        errorRate: Number(row.error_rate) || 0,
+      })
+    })
+    
+    const result = Array.from(weekMap.values()).sort((a, b) => 
+      b.week.localeCompare(a.week)
+    )
+    
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('[BigQuery] getWeeklyErrors error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+// ============================================
+// 항목별 오류 통계 조회
+// ============================================
+
+export interface ItemErrorStats {
+  itemId: string
+  itemName: string
+  category: "상담태도" | "오상담/오처리"
+  errorCount: number
+  errorRate: number
+  trend: number
+}
+
+export async function getItemErrorStats(filters?: {
+  center?: string
+  service?: string
+  channel?: string
+  startDate?: string
+  endDate?: string
+}): Promise<{ success: boolean; data?: ItemErrorStats[]; error?: string }> {
+  try {
+    const bigquery = getBigQueryClient()
+    
+    // 기본값: 최근 14일
+    let startDate = filters?.startDate
+    let endDate = filters?.endDate
+    if (!startDate || !endDate) {
+      const now = new Date()
+      endDate = now.toISOString().split('T')[0]
+      const start = new Date(now)
+      start.setDate(start.getDate() - 14)
+      startDate = start.toISOString().split('T')[0]
+    }
+    
+    let whereClause = 'WHERE evaluation_date BETWEEN @startDate AND @endDate'
+    const params: any = { startDate, endDate }
+    
+    if (filters?.center && filters.center !== 'all') {
+      whereClause += ' AND center = @center'
+      params.center = filters.center
+    }
+    if (filters?.service && filters.service !== 'all') {
+      whereClause += ' AND service = @service'
+      params.service = filters.service
+    }
+    if (filters?.channel && filters.channel !== 'all') {
+      whereClause += ' AND channel = @channel'
+      params.channel = filters.channel
+    }
+    
+    // 전일 데이터도 가져와서 trend 계산
+    const prevStartDate = new Date(startDate)
+    prevStartDate.setDate(prevStartDate.getDate() - 14)
+    const prevEndDate = new Date(startDate)
+    prevEndDate.setDate(prevEndDate.getDate() - 1)
+    const prevStartDateStr = prevStartDate.toISOString().split('T')[0]
+    const prevEndDateStr = prevEndDate.toISOString().split('T')[0]
+    
+    const query = `
+      WITH current_period AS (
+        SELECT
+          'att1' as item_id,
+          '첫인사/끝인사 누락' as item_name,
+          '상담태도' as category,
+          SUM(CAST(greeting_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'att2' as item_id,
+          '공감표현 누락' as item_name,
+          '상담태도' as category,
+          SUM(CAST(empathy_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'att3' as item_id,
+          '사과표현 누락' as item_name,
+          '상담태도' as category,
+          SUM(CAST(apology_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'att4' as item_id,
+          '추가문의 누락' as item_name,
+          '상담태도' as category,
+          SUM(CAST(additional_inquiry_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'att5' as item_id,
+          '불친절' as item_name,
+          '상담태도' as category,
+          SUM(CAST(unkind_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err1' as item_id,
+          '상담유형 오설정' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(consult_type_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err2' as item_id,
+          '가이드 미준수' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(guide_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err3' as item_id,
+          '본인확인 누락' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(identity_check_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err4' as item_id,
+          '필수탐색 누락' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(required_search_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err5' as item_id,
+          '오안내' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(wrong_guide_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err6' as item_id,
+          '전산 처리 누락' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(process_missing_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err7' as item_id,
+          '전산 처리 미완료' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(process_incomplete_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err8' as item_id,
+          '전산 조작 미흡' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(system_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err9' as item_id,
+          '콜픽트림ID 매핑 누락' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(id_mapping_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err10' as item_id,
+          '플래그키워드 누락' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(flag_keyword_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+        
+        UNION ALL
+        
+        SELECT
+          'err11' as item_id,
+          '상담이력 기재 미흡' as item_name,
+          '오상담/오처리' as category,
+          SUM(CAST(history_error AS INT64)) as error_count,
+          COUNT(*) as total_evaluations
+        FROM \`${DATASET_ID}.evaluations\`
+        ${whereClause}
+      )
+      SELECT
+        item_id,
+        item_name,
+        category,
+        error_count,
+        ROUND(SAFE_DIVIDE(error_count, total_evaluations) * 100, 2) as error_rate
+      FROM current_period
+      ORDER BY item_id
+    `
+    
+    const options = {
+      query,
+      params,
+      location: 'asia-northeast3',
+    }
+    
+    const [rows] = await bigquery.query(options)
+    
+    // 전일 데이터로 trend 계산 (간단히 0으로 설정, 추후 개선 가능)
+    const result: ItemErrorStats[] = rows.map((row: any) => ({
+      itemId: row.item_id,
+      itemName: row.item_name,
+      category: row.category as "상담태도" | "오상담/오처리",
+      errorCount: Number(row.error_count) || 0,
+      errorRate: Number(row.error_rate) || 0,
+      trend: 0, // TODO: 전일 대비 계산
+    }))
+    
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('[BigQuery] getItemErrorStats error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 export default {
   getDashboardStats,
   getCenterStats,
@@ -799,5 +1764,8 @@ export default {
   getEvaluations,
   getWatchList,
   getGoals,
+  getDailyErrors,
+  getWeeklyErrors,
+  getItemErrorStats,
   saveEvaluationsToBigQuery,
 };

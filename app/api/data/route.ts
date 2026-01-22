@@ -5,6 +5,9 @@ import {
   getDailyTrend,
   getAgents,
   getEvaluations,
+  getDailyErrors,
+  getWeeklyErrors,
+  getItemErrorStats,
 } from "@/lib/bigquery"
 
 // CORS 헤더
@@ -64,6 +67,36 @@ export async function GET(request: Request) {
 
       case "evaluations":
         result = await getEvaluations(startDate, endDate)
+        break
+
+      case "daily-errors":
+        result = await getDailyErrors({
+          startDate,
+          endDate,
+          center: searchParams.get("center") || undefined,
+          service: searchParams.get("service") || undefined,
+          channel: searchParams.get("channel") || undefined,
+        })
+        break
+
+      case "weekly-errors":
+        result = await getWeeklyErrors({
+          startDate,
+          endDate,
+          center: searchParams.get("center") || undefined,
+          service: searchParams.get("service") || undefined,
+          channel: searchParams.get("channel") || undefined,
+        })
+        break
+
+      case "item-stats":
+        result = await getItemErrorStats({
+          center: searchParams.get("center") || undefined,
+          service: searchParams.get("service") || undefined,
+          channel: searchParams.get("channel") || undefined,
+          startDate,
+          endDate,
+        })
         break
 
       default:

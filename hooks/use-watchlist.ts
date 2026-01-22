@@ -11,6 +11,7 @@ export interface WatchListAgent {
   attitudeRate: number
   opsRate: number
   totalRate: number
+  trend: number
   evaluationCount: number
   reason: string
   topErrors: string[]

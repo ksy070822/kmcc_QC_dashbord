@@ -8,6 +8,7 @@ import { FileEdit, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle }
 
 export interface WatchlistAgent {
   id: string
+  agentId: string
   name: string
   center: string
   group: string
@@ -103,7 +104,9 @@ export function WatchlistTable({
               <TableCell>
                 <Checkbox checked={selectedAgents.includes(agent.id)} onCheckedChange={() => onSelectAgent(agent.id)} />
               </TableCell>
-              <TableCell className="font-medium text-slate-900">{agent.name}</TableCell>
+              <TableCell className="font-medium text-slate-900">
+                {agent.name} ({agent.agentId})
+              </TableCell>
               <TableCell>
                 <Badge
                   variant="outline"

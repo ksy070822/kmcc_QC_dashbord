@@ -59,34 +59,14 @@ export function GoalManagement() {
     })
   }, [goalsData])
 
-  // Mock data for fallback (if no data from BigQuery)
-  const mockGoals: GoalData[] = useMemo(
-    () => goals.length > 0 ? goals : [
-      {
-        id: "1",
-        title: "1월 전체 상담태도 목표",
-        center: "전체",
-        type: "attitude",
-        targetErrorRate: 3.0,
-        currentErrorRate: 2.85,
-        period: "monthly",
-        startDate: "2026-01-01",
-        endDate: "2026-01-31",
-        progress: 70,
-        status: "on-track",
-      },
-    ],
-    [goals],
-  )
-
   const filteredGoals = useMemo(() => {
-    return mockGoals.filter((goal) => {
+    return goals.filter((goal) => {
       if (filterCenter !== "all" && goal.center !== filterCenter) return false
       if (filterStatus !== "all" && goal.status !== filterStatus) return false
       if (filterType !== "all" && goal.type !== filterType) return false
       return true
     })
-  }, [mockGoals, filterCenter, filterStatus, filterType])
+    }, [goals, filterCenter, filterStatus, filterType])
 
   const chartData = useMemo(
     () => [
@@ -112,16 +92,16 @@ export function GoalManagement() {
     setFormModalOpen(true)
   }
 
-  const achievedCount = mockGoals.filter((g) => g.status === "achieved").length
-  const atRiskCount = mockGoals.filter((g) => g.status === "at-risk" || g.status === "missed").length
+  const achievedCount = goals.filter((g) => g.status === "achieved").length
+  const atRiskCount = goals.filter((g) => g.status === "at-risk" || g.status === "missed").length
   const avgAchievement =
-    mockGoals.reduce((sum, g) => {
+    goals.length > 0 ? goals.reduce((sum, g) => {
       const rate =
         g.targetErrorRate > 0
           ? Math.min(100, (1 - (g.currentErrorRate - g.targetErrorRate) / g.targetErrorRate) * 100)
           : 100
-      return sum + rate
-    }, 0) / mockGoals.length
+        return sum + rate
+      }, 0) / goals.length : 0
 
   return (
     <div className="space-y-6">
@@ -139,7 +119,7 @@ export function GoalManagement() {
       )}
       
       <GoalSummary
-        totalGoals={mockGoals.length}
+        totalGoals={goals.length}
         achievedGoals={achievedCount}
         atRiskGoals={atRiskCount}
         avgAchievement={avgAchievement}
