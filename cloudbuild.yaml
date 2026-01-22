@@ -7,6 +7,9 @@
 # 필요한 substitution 변수:
 #   _SERVICE_NAME: Cloud Run 서비스 이름 (기본: qc-dashboard)
 #   _REGION: 배포 리전 (기본: asia-northeast3)
+#
+# 중요: 이 빌드는 반드시 asia-northeast3 (서울) 리전에서 실행되어야 합니다.
+# Cloud Build 트리거 설정에서 리전을 asia-northeast3로 지정하세요.
 
 steps:
   # 1단계: Docker 이미지 빌드 (Artifact Registry 사용)
